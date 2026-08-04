@@ -759,6 +759,13 @@ class Trainer:
         batches = self._iter_batches()
         steps_per_epoch = max(1, math.ceil(len(self.train_ds) / self.batch_size))
         wall0 = time.time()
+        t_step = wall0
+        ema_ms: float | None = None
+        epoch_loss_sum = 0.0
+        epoch_loss_n = 0
+        finite_steps = max_steps < (1 << 62)
+        total_steps = max_steps if finite_steps else max_epochs * steps_per_epoch
+        log_every = max(1, int(self.cfg.get("log_every", 10)))
         while self.epoch < max_epochs and self.global_step < max_steps:
             try:
                 batch = next(batches)
@@ -774,19 +781,39 @@ class Trainer:
             row["step"] = self.global_step
             row["epoch"] = self.epoch
             row["lr"] = self.scheduler.get_lr()
-            if self.global_step % int(self.cfg.get("log_every", 10)) == 0:
+            ms = (time.time() - t_step) * 1000.0
+            t_step = time.time()
+            ema_ms = ms if ema_ms is None else 0.95 * ema_ms + 0.05 * ms
+            epoch_loss_sum += row["loss"]
+            epoch_loss_n += 1
+            if self.global_step % steps_per_epoch == 0:
                 log.info(
-                    "step %d (epoch %d) loss=%.4f mae=%.4f mae_norm=%.4f fp=%.4f lr=%.2e",
-                    self.global_step, self.epoch, row["loss"], row["mae"],
-                    row["mae_norm"], row["fp_penalty"], row["lr"])
+                    "epoch %d/%d complete: %d steps, avg loss=%.4f, best val_mae=%.5f",
+                    self.epoch, max_epochs, steps_per_epoch,
+                    epoch_loss_sum / max(epoch_loss_n, 1), self.best_val_mae)
+                epoch_loss_sum = 0.0
+                epoch_loss_n = 0
+            if self.global_step == 1 or self.global_step % log_every == 0:
+                frac = 100.0 * self.global_step / max(total_steps, 1)
+                remaining = max(total_steps - self.global_step, 0)
+                eta_s = (ema_ms / 1000.0) * remaining
+                log.info(
+                    "step %d/%d (epoch %d/%d, %.1f%%) loss=%.4f mae=%.4f mae_norm=%.4f "
+                    "fp=%.4f lr=%.2e | %.0fms/step ETA %dm%02ds",
+                    self.global_step, total_steps, self.epoch, max_epochs, frac,
+                    row["loss"], row["mae"], row["mae_norm"], row["fp_penalty"],
+                    row["lr"], ema_ms, int(eta_s // 60), int(eta_s % 60))
             if self.global_step % int(self.cfg.get("save_every", 250)) == 0:
                 self.save_checkpoint()
             if self.global_step % int(self.cfg.get("val_every", 500)) == 0:
+                log.info("step %d: validating (val_every=%d)...", self.global_step,
+                         int(self.cfg.get("val_every", 500)))
+                _tval = time.time()
                 val = self.validate()
                 row["val_loss"] = val["val_loss"]
                 row["val_mae"] = val["val_mae"]
-                log.info("step %d val_loss=%.4f val_mae=%.4f", self.global_step,
-                         val["val_loss"], val["val_mae"])
+                log.info("step %d val_loss=%.4f val_mae=%.4f (%.1fs)", self.global_step,
+                         val["val_loss"], val["val_mae"], time.time() - _tval)
                 if val["val_mae"] < self.best_val_mae - 1e-9:
                     self.save_best(val["val_mae"])
                     self._early_stop_counter = 0
