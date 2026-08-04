@@ -16,7 +16,7 @@ from ssm_phylo.models.encoder import ProtMambaEncoder, build_encoder, make_posit
 TINY_MAMBA = {"state_size": 4, "time_step_rank": 8, "conv_kernel": 3, "expand": 2}
 
 
-def tiny_cfg(kind="from_scratch", checkpoint_dir=None, ptm_model_id="programmablebio/ptm-mamba"):
+def tiny_cfg(kind="from_scratch", checkpoint_dir=None, ptm_model_id="ChatterjeeLab/PTM-Mamba"):
     from types import SimpleNamespace
 
     return SimpleNamespace(
@@ -150,6 +150,7 @@ def test_degraded_non_mamba_checkpoint_fails(tmp_path):
 def test_ptm_mamba_not_available_without_local_checkout(monkeypatch, tmp_path):
     monkeypatch.delenv("SSM_PHYLO_PTM_MAMBA_DIR", raising=False)
     monkeypatch.setenv("SSM_PHYLO_PTM_MAMBA_TIMEOUT", "10")
+    monkeypatch.setenv("HF_HUB_OFFLINE", "1")  # CI must never hit the network
     with pytest.raises(RuntimeError, match="ptm_mamba not available"):
         build_encoder(tiny_cfg("ptm_mamba"), device="cpu")
 
@@ -158,6 +159,7 @@ def test_ptm_mamba_bogus_local_checkout_raises(monkeypatch, tmp_path):
     monkeypatch.setenv("SSM_PHYLO_PTM_MAMBA_DIR", str(tmp_path / "empty_checkout"))
     (tmp_path / "empty_checkout").mkdir()
     monkeypatch.setenv("SSM_PHYLO_PTM_MAMBA_TIMEOUT", "10")
+    monkeypatch.setenv("HF_HUB_OFFLINE", "1")  # CI must never hit the network
     with pytest.raises(RuntimeError, match="ptm_mamba not available"):
         build_encoder(tiny_cfg("ptm_mamba"), device="cpu")
 

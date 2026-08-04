@@ -59,6 +59,12 @@ class AttentionPooling(nn.Module):
         scores = hidden @ self.query  # (B, L)
         scores = scores.masked_fill(~mask, float("-inf"))
         weights = F.softmax(scores, dim=-1)  # (B, L), sum 1 over valid tokens
+        # All-masked rows produce softmax(-inf) = NaN (0/0). Degenerate rows
+        # must pool to ZERO — otherwise a NaN pooled value multiplies the
+        # zero gradient of masked spans (NaN * 0 = NaN poisons the whole
+        # backward pass in mixed-n batches). nan_to_num passes NaN positions
+        # a zero gradient.
+        weights = torch.nan_to_num(weights, nan=0.0)
         pooled = (weights.unsqueeze(-1) * hidden).sum(dim=1)  # (B, d_model)
         return self.proj(pooled)
 
@@ -147,36 +153,46 @@ class DistanceHead(nn.Module):
         return embs
 
     # -- pairwise scores ---------------------------------------------------- #
-    def _bilinear(self, embs: torch.Tensor) -> torch.Tensor:
-        s = (embs @ self.bilinear_w) @ embs.transpose(1, 2)  # (B, n, n)
-        return s + self.bilinear_b
+    def _score_blocks(self, ei: torch.Tensor, ej: torch.Tensor) -> torch.Tensor:
+        """RAW pair scores for two embedding blocks: (B, ci, cj).
 
-    def _pair_mlp(self, embs: torch.Tensor) -> torch.Tensor:
-        """MLP refinement over all pairs, chunked along the j axis."""
-        B, n, d = embs.shape
-        out = torch.zeros(B, n, n, dtype=embs.dtype, device=embs.device)
-        ei_all = embs[:, :, None, :].expand(B, n, n, d)
-        for j0 in range(0, n, self.pair_chunk):
-            j1 = min(j0 + self.pair_chunk, n)
-            ei = ei_all[:, :, j0:j1, :]            # (B, n, c, d)
-            ej = embs[:, None, j0:j1, :].expand(B, n, j1 - j0, d)
-            feats = torch.cat([ei, ej, ei * ej, (ei - ej).abs()], dim=-1)
-            out[:, :, j0:j1] = self.mlp(feats).squeeze(-1)
-        return out
+        ei: (B, ci, d_emb), ej: (B, cj, d_emb). Bilinear core (+ optional MLP
+        refinement) WITHOUT symmetrization/softplus — callers (forward,
+        blockwise inference) post-process via self.postprocess. This is the
+        single source of truth for pair scoring.
+        """
+        B, ci, _ = ei.shape
+        cj = ej.shape[1]
+        s = torch.zeros(B, ci, cj, dtype=ei.dtype, device=ei.device)
+        if self.head_type in ("bilinear", "bilinear_mlp"):
+            s = s + (ei @ self.bilinear_w) @ ej.transpose(1, 2) + self.bilinear_b
+        if self.head_type in ("mlp", "bilinear_mlp"):
+            ei_all = ei.unsqueeze(2).expand(B, ci, cj, self.d_emb)
+            for j0 in range(0, cj, self.pair_chunk):
+                j1 = min(j0 + self.pair_chunk, cj)
+                ejb = ej[:, None, j0:j1, :].expand(B, ci, j1 - j0, self.d_emb)
+                feats = torch.cat([ei_all[:, :, j0:j1, :], ejb, ei_all[:, :, j0:j1, :] * ejb,
+                                   (ei_all[:, :, j0:j1, :] - ejb).abs()], dim=-1)
+                s[:, :, j0:j1] = s[:, :, j0:j1] + self.mlp(feats).squeeze(-1)
+        return s
+
+    def postprocess(self, raw: torch.Tensor) -> torch.Tensor:
+        """raw (n, n) or (B, n, n) -> symmetric, >=0, zero diag, <= max_dist."""
+        squeeze = raw.ndim == 2
+        if squeeze:
+            raw = raw.unsqueeze(0)
+        s = 0.5 * (raw + raw.transpose(1, 2))
+        dist = F.softplus(s)
+        n = s.shape[1]
+        eye = torch.eye(n, device=s.device, dtype=s.dtype).unsqueeze(0)
+        dist = dist * (1.0 - eye)
+        out = dist.clamp(max=self.max_dist)
+        return out[0] if squeeze else out
 
     # -- output ------------------------------------------------------------- #
     def forward(self, embs: torch.Tensor) -> torch.Tensor:
         """embs: (B, n, d_emb) -> (B, n, n) symmetric, >=0, <= max_dist."""
-        s = torch.zeros(embs.shape[0], embs.shape[1], embs.shape[1], dtype=embs.dtype, device=embs.device)
-        if self.head_type in ("bilinear", "bilinear_mlp"):
-            s = s + self._bilinear(embs)
-        if self.head_type in ("mlp", "bilinear_mlp"):
-            s = s + self._pair_mlp(embs)
-        s = 0.5 * (s + s.transpose(1, 2))
-        dist = F.softplus(s)
-        eye = torch.eye(embs.shape[1], device=embs.device, dtype=embs.dtype).unsqueeze(0)
-        dist = dist * (1.0 - eye)
-        return dist.clamp(max=self.max_dist)
+        return self.postprocess(self._score_blocks(embs, embs))
 
 
 # --------------------------------------------------------------------------- #
@@ -245,7 +261,7 @@ def _smoke_config() -> Any:
             kind="from_scratch",
             checkpoint_dir=None,
             mamba={"state_size": 4, "time_step_rank": 8, "conv_kernel": 3, "expand": 2},
-            ptm_model_id="programmablebio/ptm-mamba",
+            ptm_model_id="ChatterjeeLab/PTM-Mamba",
         ),
     )
 

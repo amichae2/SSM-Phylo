@@ -10,6 +10,7 @@ import dendropy
 import numpy as np
 import pyarrow.parquet as pq
 import pytest
+import torch
 
 from ssm_phylo.data.datasets import (
     ParquetPhyloDataset,
@@ -93,19 +94,22 @@ def test_tokenization_spans_cover_stream(raw_dir, tmp_path):
         assert starts[i + 1] == ends[i] + 1  # exactly one separator between spans
         assert tokens[ends[i]] == tok.sep_id
     assert ends[-1] == len(tokens)
-    # reconstructed stream matches tokens exactly
+    # reconstructed stream matches tokens exactly (cls prefix + sep between)
     seqs = pq.read_table(out)["seqs"][0].as_py()
     expected = []
     for i, seq in enumerate(seqs):
+        expected.append(tok.cls_id)
         expected.extend(tok.encode(seq))
         if i < len(seqs) - 1:
             expected.append(tok.sep_id)
     assert tokens.tolist() == expected
-    # no separator token inside any span
+    # every span starts with <cls>, and no separator sits inside a span
     for s, e in spans:
+        assert tokens[s] == tok.cls_id
         assert tok.sep_id not in tokens[s:e].tolist()
     # exactly n-1 separators in the stream
     assert int((tokens == tok.sep_id).sum()) == len(seqs) - 1
+    assert int((tokens == tok.cls_id).sum()) == len(seqs)
 
 
 def test_true_distances_match_dendropy(raw_dir, tmp_path):
@@ -133,14 +137,14 @@ def test_collate_bucketing_never_exceeds_max_seq_len(raw_dir, tmp_path):
     consolidate_to_parquet(str(raw_dir), out, seed=42)
     ds = ParquetPhyloDataset(out, max_seq_len=512)
     batch = [ds[i] for i in range(len(ds))]
-    # synthetic over-length sample: 100 seqs x 200 tokens each
+    # synthetic over-length sample: 100 seqs x 200 tokens each, cls-prefixed
     tok = get_tokenizer()
-    long_seq = "M" * 500
     big_tokens, big_spans = [], []
     for k in range(100):
         start = len(big_tokens)
-        big_tokens.extend(tok.encode(long_seq[:200]))
-        big_spans.append((start, start + 200))
+        big_tokens.append(tok.cls_id)
+        big_tokens.extend(tok.encode("M" * 200))
+        big_spans.append((start, start + 201))
         if k < 99:
             big_tokens.append(tok.sep_id)
     big_tokens = np.asarray(big_tokens, dtype=np.int64)
@@ -148,16 +152,24 @@ def test_collate_bucketing_never_exceeds_max_seq_len(raw_dir, tmp_path):
     big_dm = np.ones((n, n), dtype=np.float32)
     batch.append((big_tokens, big_spans, big_dm, 1.0, "(x,y);"))
     max_seq_len = 512
-    tok_t, spans_t, mask_t, dm_t, scales_t = collate_with_bucketing(
+    tok_t, spans_t, spans_mask, dm_t, scales_t = collate_with_bucketing(
         batch, max_seq_len=max_seq_len, pad_id=tok.pad_id, bucket_step=128
     )
     assert tok_t.shape[1] <= max_seq_len
     assert tok_t.shape[0] == len(batch)
     assert spans_t.shape[2] == 2
     assert dm_t.shape[1] == dm_t.shape[2]
-    assert mask_t.shape == tok_t.shape
-    assert (mask_t.sum(1) <= tok_t.shape[1]).all()
-    assert (tok_t == tok.pad_id).all(0)[tok_t.shape[1] - 1].item() or True
+    # PER-SPAN mask: shape (B, N), not (B, L) — one entry per sequence
+    n_max = spans_t.shape[1]
+    assert spans_mask.shape == (len(batch), n_max)
+    assert spans_mask.dtype == torch.bool
+    assert (spans_mask.sum(1) <= n_max).all()
+    assert (spans_mask.sum(1) >= 1).all()  # every sample has real sequences
+    # padded spans are (0, 0) and masked out
+    for b in range(len(batch)):
+        for r in range(int(spans_mask[b].sum()), n_max):
+            assert spans_t[b, r, 0] == 0 and spans_t[b, r, 1] == 0
+            assert not spans_mask[b, r]
     # real samples' distance matrices preserved in padded tensor
     assert float(scales_t[0]) == pytest.approx(float(batch[0][3]))
 

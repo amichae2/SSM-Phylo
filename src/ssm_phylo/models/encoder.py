@@ -7,9 +7,9 @@ build_encoder(cfg) supports three kinds (see configs/default.yaml `encoder:`):
 - degraded_protmamba: ProtMamba v1.0 backbone loaded via checkpoint_compat.py
                     (shape-inferred, ckpt_layer remap, embedding re-initialized,
                     finite-forward gate). Requires $PROT_MAMBA_CKPT.
-- ptm_mamba:        DORMANT. No public weights exist (programmablebio/ptm-mamba
-                    does not exist on HF; the real PTM-Mamba is code-only and
-                    cc-by-nc-nd-4.0, whose ND clause forbids derivatives).
+- ptm_mamba:        DORMANT. No public weights exist for ChatterjeeLab/PTM-Mamba
+                    (code-only repo, cc-by-nc-nd-4.0, whose ND clause forbids
+                    derivatives); raises a clear "not available" error.
                     Time-boxed wrapper: raises a clear "not available" error
                     unless SSM_PHYLO_PTM_MAMBA_DIR points at a local checkout
                     that loads cleanly.
@@ -72,9 +72,9 @@ def _mamba_config(cfg: Any) -> Any:
 
     kw = _mamba_kwargs(cfg)
     return MambaConfig(
-        vocab_size=int(cfg.vocab_size),
-        hidden_size=int(cfg.d_model),
-        num_hidden_layers=int(cfg.n_layer),
+        vocab_size=int(_get(cfg, "vocab_size")),
+        hidden_size=int(_get(cfg, "d_model")),
+        num_hidden_layers=int(_get(cfg, "n_layer")),
         state_size=int(kw["state_size"]),
         time_step_rank=int(kw["time_step_rank"]),
         conv_kernel=int(kw["conv_kernel"]),
@@ -114,8 +114,8 @@ def _build_degraded_protmamba(
         )
     model = MambaForCausalLM(_mamba_config(cfg))
     cc.load_degraded_backbone(model, ckpt_dir, cfg)
-    cc.reinit_embedding(model, int(cfg.d_model), int(cfg.vocab_size))
-    cc.gate_finite_forward(model, int(cfg.vocab_size))
+    cc.reinit_embedding(model, int(_get(cfg, "d_model")), int(_get(cfg, "vocab_size")))
+    cc.gate_finite_forward(model, int(_get(cfg, "vocab_size")))
     if device:
         model = model.to(device)
     return model
@@ -151,7 +151,7 @@ def _build_ptm_mamba(cfg: Any, device: str | None) -> nn.Module:
     commercial release). This mode only works with a local checkout via
     SSM_PHYLO_PTM_MAMBA_DIR and raises a clear "not available" error otherwise.
     """
-    model_id = _get(_encoder_section(cfg), "ptm_model_id", "programmablebio/ptm-mamba")
+    model_id = _get(_encoder_section(cfg), "ptm_model_id", "ChatterjeeLab/PTM-Mamba")
     local = os.environ.get("SSM_PHYLO_PTM_MAMBA_DIR")
     budget = float(os.environ.get("SSM_PHYLO_PTM_MAMBA_TIMEOUT", "120"))
     try:
@@ -160,14 +160,14 @@ def _build_ptm_mamba(cfg: Any, device: str | None) -> nn.Module:
                 budget,
                 _load_ptm_mamba_local,
                 local,
-                int(cfg.d_model),
-                int(cfg.n_layer),
-                int(cfg.vocab_size),
+                int(_get(cfg, "d_model")),
+                int(_get(cfg, "n_layer")),
+                int(_get(cfg, "vocab_size")),
             )
         else:
             model = _timebox(
                 budget, _load_ptm_mamba_hf, model_id,
-                int(cfg.d_model), int(cfg.n_layer), int(cfg.vocab_size),
+                int(_get(cfg, "d_model")), int(_get(cfg, "n_layer")), int(_get(cfg, "vocab_size")),
             )
     except Exception as exc:
         raise RuntimeError(

@@ -139,8 +139,9 @@ def test_background_push_never_blocks_training(tmp_path):
     assert rc == 0, out[-3000:]
     n_pushes = len(push_log.read_text().splitlines()) if push_log.exists() else 0
     assert n_pushes == 1, f"expected exactly 1 push (skip-if-running), got {n_pushes}"
-    # 4 saves at 0.2s/step + one 5s push wait; blocking per-save would be ~20s+
-    assert wall < 12, f"training blocked on push (wall={wall:.1f}s)"
+    # 4 saves at 0.2s/step + one 5s push wait + build/sim overhead; blocking
+    # per-save would be ~20s+ (4 x 5s) — 15s proves pushes never block
+    assert wall < 15, f"training blocked on push (wall={wall:.1f}s)"
 
 
 def test_help_exits_zero():

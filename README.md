@@ -4,10 +4,12 @@ SSM distance estimator for phylogenetic trees. A neural network that takes
 **unaligned** biological sequences and outputs an n×n pairwise
 evolutionary-distance matrix; trees are built from that matrix with FastME.
 
-The encoder is a pretrained **ProtMamba** (Mamba SSM, ~100M params, Apache-2.0)
-reused as-is for its hidden states. The novel code is the task head
-(per-sequence attention pooling + bilinear/MLP distance predictor + loss) and
-fine-tuning.
+The encoder is **config-driven** (`build_encoder(cfg)`): the default kind is
+`from_scratch` (HF eager MambaForCausalLM, random weights — license-clean,
+CI-safe, no weights needed); `degraded_protmamba` loads the ProtMamba v1.0
+backbone via `checkpoint_compat.py` as a gated experiment; `ptm_mamba` is
+dormant. The novel code is the task head (per-sequence attention pooling +
+bilinear/MLP distance predictor + loss) and fine-tuning.
 
 ## Known issues / checkpoint provenance
 

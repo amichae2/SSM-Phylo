@@ -3,9 +3,15 @@
 ## Project goal
 A neural network that takes UNALIGNED biological sequences and outputs an n×n
 pairwise evolutionary-distance matrix; trees are built from that matrix with
-FastME. The encoder is a pretrained ProtMamba (Mamba SSM, ~100M params) reused
-as-is for its hidden states; the NOVEL code is the task head (per-sequence
-attention pooling + bilinear/MLP distance predictor + loss) plus fine-tuning.
+FastME. The encoder is CONFIG-DRIVEN (build_encoder(cfg), see
+src/ssm_phylo/models/encoder.py): the default kind is `from_scratch` (HF
+eager MambaForCausalLM, random weights — license-clean, CI-safe, no weights
+needed); `degraded_protmamba` loads the ProtMamba v1.0 backbone via
+checkpoint_compat.py as a gated experiment (the release weights are broken —
+see "Known issue" below); `ptm_mamba` is dormant (no public weights, and the
+real PTM-Mamba is cc-by-nc-nd-4.0). The NOVEL code is the task head
+(per-sequence attention pooling + bilinear/MLP distance predictor + loss)
+plus fine-tuning.
 
 ## Storage architecture (Google Drive primary — READ THIS FIRST)
 Paths use these env vars (set in .env, sourced by every script):

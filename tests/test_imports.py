@@ -49,10 +49,9 @@ def test_submodules_import_without_mamba_ssm(monkeypatch):
 def test_placeholder_mains_return_zero():
     """Phase-0 stubs: every main() prints its purpose and returns 0.
 
-    train is a real CLI since Phase 3 (its main() parses argv), so it is
-    excluded here.
+    train/infer/build_tree/evaluate are real CLIs since Phases 3-4 (their
+    main() parses argv), so they are excluded here.
     """
-    from ssm_phylo import build_tree, evaluate, infer, losses
+    from ssm_phylo import losses
 
-    for mod in [losses, infer, build_tree, evaluate]:
-        assert mod.main() == 0
+    assert losses.main() == 0

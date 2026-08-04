@@ -382,6 +382,7 @@ class Checkpointer:
             "scheduler_state": trainer.scheduler.state_dict() if trainer.scheduler else None,
             "rng_state": _rng_state(),
             "config": trainer.cfg,
+            "scale": trainer.scale_factor,  # global scale for raw-unit inference
             "val_metric": val_metric,
         }
 
@@ -564,6 +565,7 @@ class Trainer:
             tokenizer=self.tokenizer,
         )
         self.fixed_val_batch = self._fixed_val_batch()
+        self.scale_factor = self._train_scale_factor()
 
         # ---- state ----
         self.epoch = 0
@@ -574,6 +576,23 @@ class Trainer:
         self._early_stop_counter = 0
         self._stop_requested = False
         self._resumed_from: tuple[str, int] | None = None
+
+    def _train_scale_factor(self) -> float:
+        """Median 'scale' column of the train parquet (global raw-unit factor).
+
+        The model predicts NORMALIZED distances; inference multiplies by this
+        factor to return raw substitution units. Defaults to 1.0.
+        """
+        try:
+            import pyarrow.parquet as pq
+
+            path = os.path.join(self.paths["data_dir"], "train.parquet")
+            table = pq.read_table(path, columns=["scale"])
+            scales = table.column(0).to_numpy()
+            return float(np.median(scales)) if len(scales) else 1.0
+        except Exception:
+            log.warning("could not read train scale column; scale_factor=1.0", exc_info=True)
+            return 1.0
 
     # -- logging ------------------------------------------------------------ #
     def _init_extra_logger(self) -> None:

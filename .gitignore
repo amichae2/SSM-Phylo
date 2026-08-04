@@ -28,7 +28,11 @@ env/
 *.bin
 
 # ---- local scratch / results (paths are normally env-driven; keep the repo clean) ----
-data/
+# Root-anchored ONLY: a bare `data/` pattern matches ANY directory named data,
+# including src/ssm_phylo/data/ — that silently excluded the entire data
+# package from git once before. Do not revert to the bare pattern.
+/data/
+!src/ssm_phylo/data/
 ckpts/
 checkpoints/
 results/
