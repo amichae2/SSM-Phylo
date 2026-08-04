@@ -120,15 +120,24 @@ if [ -n "${COLAB_DRIVE:-}" ]; then
 fi
 
 # ------------------------------------------------------------ 4. pip installs
-if python -c "import torch" >/dev/null 2>&1; then
-  say "torch already importable ($(python -c "import torch; print(torch.__version__)" 2>/dev/null || echo unknown)); skipping requirements install"
+# ALWAYS run the requirements install. Colab ships torch, so a
+# "torch importable -> skip" guard would skip EVERYTHING else (transformers,
+# dendropy, biopython, datasets, PyYAML, ...) and the repo package — breaking
+# `import ssm_phylo` on fresh VMs. pip is idempotent: already-satisfied pins
+# are fast no-ops, so running this twice is safe and quick.
+say "Installing pinned deps from requirements-colab.txt..."
+if python -m pip install -r "$REPO_DIR/requirements-colab.txt"; then
+  say "Pinned deps installed."
 else
-  say "Installing pinned deps from requirements-colab.txt..."
-  if python -m pip install -r "$REPO_DIR/requirements-colab.txt"; then
-    say "Pinned deps installed."
-  else
-    warn "pip install failed for requirements-colab.txt (retrying common deps is up to you)"
-  fi
+  warn "pip install failed for requirements-colab.txt (retrying common deps is up to you)"
+fi
+
+# Install the repo package itself (src layout — sys.path hacks do NOT help).
+say "Installing ssm_phylo package (pip install -e .)..."
+if python -m pip install -e "$REPO_DIR"; then
+  say "ssm_phylo installed."
+else
+  warn "pip install -e . failed; ssm_phylo imports will not work (check pip errors above)"
 fi
 
 # --------------------------------------- 5. mamba-ssm attempt (sm_80+ only)

@@ -1,6 +1,11 @@
 # Colab installation order matters: causal-conv1d first (mamba-ssm build dep),
 # then mamba-ssm last (it pins/builds against the already-installed torch).
 #
+# NOTE: `pip install -e .` (the ssm_phylo repo package itself) is run
+# SEPARATELY by scripts/colab_setup.sh and is NOT part of this requirements
+# file — the repo is src-layout, so installing the package is required for
+# `import ssm_phylo` / `python -m ssm_phylo.*` to work.
+#
 # Colab fallback strategy (AGENTS.md constraint 4):
 #   1. Install everything here EXCEPT mamba-ssm first (fast, wheel-based).
 #   2. On sm_80+ GPUs (A100/L4/H100) attempt, separately:
