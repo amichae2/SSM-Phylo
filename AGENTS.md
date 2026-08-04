@@ -58,13 +58,19 @@ Golden rules:
 3. Target hardware: Google Colab Pro (L4 24GB typical, A100-40GB possible).
    Design for: session death at any moment, ephemeral VM disk, Drive FUSE
    latency. Everything must checkpoint/resume.
-4. Fallback-first Mamba: try `pip install mamba-ssm==2.1.0 --no-build-isolation`;
-   if that fails, use HuggingFace transformers' eager Mamba (MambaForCausalLM).
-   Never let the install block the pipeline. bf16 only on sm_80+ GPUs
-   (A100/L4/H100); fp16 fallback on T4 (dev/smoke only).
-5. Pins: torch==2.3.1, transformers==4.44.2, mamba-ssm==2.1.0, numpy==1.24.4,
-   datasets==2.10.1, pyarrow (latest), pandas (latest), scipy, scikit-learn,
-   biopython, tqdm, PyYAML, wandb, tensorboard, pytest, ruff, mypy.
+4. Fallback-first Mamba: the pipeline runs fully on transformers' EAGER Mamba
+   (MambaForCausalLM). mamba-ssm is OPTIONAL — never installed by default, only
+   attempted if it builds (it is gated behind SSM_PHYLO_TRY_MAMBA=1 in
+   colab_setup.sh; mamba-ssm==2.1.0 is the last source-buildable version and
+   needs an exact old-torch env). Never let the install block the pipeline.
+   bf16 only on sm_80+ GPUs (A100/L4/H100); fp16 fallback on T4 (dev/smoke
+   only).
+5. Pins: modern versions are fine. Floor pins only (torch>=2.1,
+   transformers>=4.44, numpy>=1.24) in pyproject.toml and
+   requirements-colab.txt — strict pins would downgrade Colab's preinstalled
+   torch/numpy on every fresh VM. Rest unpinned: pandas, pyarrow, scipy,
+   scikit-learn, biopython, dendropy, tqdm, PyYAML, wandb, tensorboard, plus
+   pytest, ruff, mypy for dev.
 6. Reproducibility: fixed seeds everywhere (42), configs in configs/*.yaml,
    every training run logs step/epoch/loss and writes a resume-able checkpoint.
 7. Output distance matrix must be SYMMETRIC and NON-NEGATIVE. Predict only i<j

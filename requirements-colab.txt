@@ -1,40 +1,37 @@
-# Colab installation order matters: causal-conv1d first (mamba-ssm build dep),
-# then mamba-ssm last (it pins/builds against the already-installed torch).
+# Colab installation order matters: install everything here in one go.
 #
 # NOTE: `pip install -e .` (the ssm_phylo repo package itself) is run
 # SEPARATELY by scripts/colab_setup.sh and is NOT part of this requirements
 # file — the repo is src-layout, so installing the package is required for
 # `import ssm_phylo` / `python -m ssm_phylo.*` to work.
 #
-# Colab fallback strategy (AGENTS.md constraint 4):
-#   1. Install everything here EXCEPT mamba-ssm first (fast, wheel-based).
-#   2. On sm_80+ GPUs (A100/L4/H100) attempt, separately:
-#        pip install mamba-ssm==2.1.0 --no-build-isolation
-#      with a 15-minute timeout (see scripts/colab_setup.sh).
-#   3. If that install fails (missing ninja/CUDA toolchain, timeout, ...),
-#      the pipeline falls back to HuggingFace transformers' EAGER Mamba
-#      (MambaForCausalLM). Never let the install block the pipeline.
-#   4. bf16 is used only on sm_80+; T4 (sm_75) falls back to fp16 and is
-#      dev/smoke only.
+# Fallback-first Mamba (AGENTS.md constraint 4):
+#   The pipeline runs fully on transformers' EAGER Mamba (MambaForCausalLM).
+#   mamba-ssm is OPTIONAL and is never installed here: mamba-ssm==2.1.0 is the
+#   last version that builds from source, and it requires an exact old-torch
+#   environment (torch 2.3.x era) — it fails to build on modern Colab
+#   (torch >= 2.11). Only scripts/colab_setup.sh may attempt it, gated behind
+#   SSM_PHYLO_TRY_MAMBA=1 (default off). Never let it block the pipeline.
 #
 # Usage: pip install -r requirements-colab.txt
 #
-# Pin policy: torch / numpy / transformers use FLOOR pins (>=) because Colab
-# ships newer versions already. Strict pins would force a multi-GB torch
-# re-download and a numpy downgrade on every fresh VM session. The strict
-# pins live in pyproject.toml (reproducibility); this file keeps the Colab
-# session fast.
+# Pin policy: modern versions are fine. torch / transformers / numpy use
+# FLOOR pins (>=) because Colab ships newer versions already; strict pins
+# would force a multi-GB torch re-download and a numpy downgrade on every
+# fresh VM session. Other deps are unpinned and resolve to whatever Colab
+# ships. The package itself (pyproject.toml) mirrors these floor pins.
+#
+# THIS IS THE FULL DEPENDENCY LIST — there are no hidden extras to install.
 
-torch>=2.3.1
-transformers>=4.44.2,<5
-datasets==2.10.1
-numpy>=1.24.4
+torch>=2.1
+transformers>=4.44
+numpy>=1.24
 pandas
 pyarrow
 scipy
 scikit-learn
 biopython
-dendropy==5.0.10
+dendropy
 tqdm
 PyYAML
 wandb
@@ -43,6 +40,9 @@ pytest
 ruff
 mypy
 
-# --- CUDA kernel extras (optional, install via scripts/colab_setup.sh) ---
+# --- CUDA kernel extras (NOT installed; opt-in only) ---
+# mamba-ssm==2.1.0 needs an exact old-torch env and fails on modern Colab.
+# Set SSM_PHYLO_TRY_MAMBA=1 in scripts/colab_setup.sh to attempt it; the
+# pipeline runs fine without it (eager Mamba fallback).
 # causal-conv1d
 # mamba-ssm==2.1.0  (build from source: pip install mamba-ssm==2.1.0 --no-build-isolation)

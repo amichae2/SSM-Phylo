@@ -5,26 +5,24 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ssm-phylo"
 version = "0.1.0"
-description = "SSM distance estimator for phylogenetic trees from unaligned sequences (ProtMamba encoder + task head)."
+description = "SSM distance estimator for phylogenetic trees from unaligned sequences (from-scratch Mamba encoder + task head)."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "Apache-2.0" }
+# Floor pins on purpose: this project is a from-scratch Mamba + head model and
+# runs on Colab, which ships newer torch/transformers/numpy. Strict pins would
+# force a multi-GB torch/numpy downgrade on every fresh VM. The pipeline runs
+# on transformers' EAGER Mamba (MambaForCausalLM) — no CUDA compile needed.
 dependencies = [
-    "torch==2.3.1",
-    "transformers==4.44.2",
-    # NOTE: mamba-ssm is an OPTIONAL dependency. It must NEVER be imported at
-    # package import time: wrap every import in try/except and fall back to
-    # transformers' eager Mamba (see requirements-colab.txt for the Colab
-    # install strategy). It is deliberately NOT in [project].dependencies so a
-    # fresh env can install and import this package without compiling CUDA.
-    "datasets==2.10.1",
-    "numpy==1.24.4",
+    "torch>=2.1",
+    "transformers>=4.44",
+    "numpy>=1.24",
     "pandas",
     "pyarrow",
     "scipy",
     "scikit-learn",
     "biopython",
-    "dendropy==5.0.10",
+    "dendropy",
     "tqdm",
     "PyYAML",
     "wandb",
@@ -32,8 +30,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Fused kernel extras. causal-conv1d is a build-time dep of mamba-ssm when
-# building from source; both are optional and GPU/CUDA-build specific.
+# Fused-kernel extras — ONLY for the optional mamba-ssm speedup, NEVER required.
+# The pipeline must run fully on the eager Mamba fallback. mamba-ssm==2.1.0 is
+# pinned to the last version that builds from source; it requires an exact
+# old-torch environment (torch 2.3.x era) and fails to build on modern Colab
+# (torch >= 2.11). Do NOT install this extra in the Colab setup script; it is
+# opt-in via SSM_PHYLO_TRY_MAMBA=1 for bespoke environments only.
 cuda = [
     "causal-conv1d",
     "mamba-ssm==2.1.0",

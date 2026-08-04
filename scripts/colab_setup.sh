@@ -10,10 +10,11 @@
 #   3. Creates the persistent/scratch directory layout.
 #   4. Installs deps from requirements-colab.txt (ALWAYS run — pip is
 #      idempotent, satisfied pins are fast no-ops), then installs the
-#      ssm_phylo package itself with `pip install -e .` (src layout).
-#   5. On sm_80+ only: attempts `pip install mamba-ssm==2.1.0 --no-build-isolation`
-#      with a 15-minute timeout; on any failure prints "FALLBACK: eager Mamba"
-#      and continues.
+#      ssm_phylo package itself with `pip install -e . --no-deps` (src layout).
+#   5. mamba-ssm fused kernels are OPTIONAL and OFF by default: the pipeline
+#      runs fully on transformers' eager Mamba. mamba-ssm==2.1.0 only builds in
+#      an exact old-torch environment and fails on modern Colab (torch >= 2.11);
+#      it is attempted only when SSM_PHYLO_TRY_MAMBA=1 is set.
 #
 # Exit code is ALWAYS 0. Safe to run twice.
 set -u
@@ -134,10 +135,9 @@ else
 fi
 
 # Install the repo package itself (src layout — sys.path hacks do NOT help).
-# --no-deps: pyproject.toml's strict pins (torch==2.3.1, numpy==1.24.4,
-# transformers==4.44.2) would downgrade Colab's preinstalled versions
-# (multi-GB, slow, often fails); dependencies are handled by
-# requirements-colab.txt above.
+# --no-deps: dependencies are handled by requirements-colab.txt above
+# (pyproject.toml uses floor pins so a plain install would also work, but
+# --no-deps keeps pip fast and idempotent on Colab).
 say "Installing ssm_phylo package (pip install -e . --no-deps)..."
 if python -m pip install -e "$REPO_DIR" --no-deps; then
   say "ssm_phylo installed."
@@ -145,20 +145,33 @@ else
   warn "pip install -e . --no-deps failed; ssm_phylo imports will not work (check pip errors above)"
 fi
 
-# --------------------------------------- 5. mamba-ssm attempt (sm_80+ only)
-NEED_MAMBA=0
-if [ -n "$CC" ] && awk -v c="$CC" 'BEGIN{exit !(c+0 >= 8.0)}'; then
-  NEED_MAMBA=1
-fi
-if [ "$NEED_MAMBA" = "1" ]; then
-  # Gate on a CUDA-capable torch and nvcc: without both, a from-source build
-  # is doomed (this also keeps non-Colab boxes fast).
+# --------------------------------------- 5. mamba-ssm (OPTIONAL, default OFF)
+# The pipeline runs fully on transformers' EAGER Mamba fallback — mamba-ssm is
+# never required. mamba-ssm==2.1.0 is the last version that builds from source
+# and requires an exact old-torch environment (torch 2.3.x era); it fails to
+# build on modern Colab (torch >= 2.11). Therefore the build is attempted ONLY
+# when the user opts in explicitly: SSM_PHYLO_TRY_MAMBA=1.
+if [ "${SSM_PHYLO_TRY_MAMBA:-0}" != "1" ]; then
+  say "mamba-ssm build skipped (SSM_PHYLO_TRY_MAMBA is not 1). Pipeline uses the eager Mamba fallback."
+else
+  # Opt-in attempt. Guard on compute capability, a CUDA-capable torch and nvcc:
+  # without all three a from-source build is doomed.
+  say "SSM_PHYLO_TRY_MAMBA=1 set — attempting mamba-ssm==2.1.0 (opt-in; fails on modern torch on purpose)."
+  NEED_MAMBA=0
+  if [ -n "$CC" ] && awk -v c="$CC" 'BEGIN{exit !(c+0 >= 8.0)}'; then
+    NEED_MAMBA=1
+  fi
   CUDA_TORCH=0
-  if python - <<'PY' >/dev/null 2>&1; then CUDA_TORCH=1; fi
+  if python - <<'PY' >/dev/null 2>&1; then
 import torch
 exit(0 if torch.cuda.is_available() else 1)
 PY
-  if [ "$CUDA_TORCH" = "0" ]; then
+    CUDA_TORCH=1
+  fi
+  if [ "$NEED_MAMBA" != "1" ]; then
+    say "Skipping mamba-ssm build (requires sm_80+; got '${CC:-no GPU}')."
+    printf '\n[colab_setup] FALLBACK: eager Mamba\n'
+  elif [ "$CUDA_TORCH" = "0" ]; then
     say "CUDA-capable torch not detected; skipping mamba-ssm build (would fail from source)."
     printf '\n[colab_setup] FALLBACK: eager Mamba\n'
   elif ! command -v nvcc >/dev/null 2>&1; then
@@ -171,16 +184,13 @@ PY
     if timeout 900 pip install mamba-ssm==2.1.0 --no-build-isolation; then
       say "mamba-ssm installed."
     else
-      warn "mamba-ssm build failed/timed out."
+      warn "mamba-ssm build failed/timed out (expected on modern torch)."
       printf '\n[colab_setup] FALLBACK: eager Mamba\n'
     fi
   else
     warn "timeout/pip not available; skipping mamba-ssm build."
     printf '\n[colab_setup] FALLBACK: eager Mamba\n'
   fi
-else
-  say "Skipping mamba-ssm build (requires sm_80+; got '${CC:-no GPU}')."
-  printf '\n[colab_setup] FALLBACK: eager Mamba\n'
 fi
 
 say "Setup complete."
