@@ -134,11 +134,15 @@ else
 fi
 
 # Install the repo package itself (src layout — sys.path hacks do NOT help).
-say "Installing ssm_phylo package (pip install -e .)..."
-if python -m pip install -e "$REPO_DIR"; then
+# --no-deps: pyproject.toml's strict pins (torch==2.3.1, numpy==1.24.4,
+# transformers==4.44.2) would downgrade Colab's preinstalled versions
+# (multi-GB, slow, often fails); dependencies are handled by
+# requirements-colab.txt above.
+say "Installing ssm_phylo package (pip install -e . --no-deps)..."
+if python -m pip install -e "$REPO_DIR" --no-deps; then
   say "ssm_phylo installed."
 else
-  warn "pip install -e . failed; ssm_phylo imports will not work (check pip errors above)"
+  warn "pip install -e . --no-deps failed; ssm_phylo imports will not work (check pip errors above)"
 fi
 
 # --------------------------------------- 5. mamba-ssm attempt (sm_80+ only)
