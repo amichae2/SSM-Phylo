@@ -658,7 +658,9 @@ class Trainer:
     def train_step(self, batch: tuple) -> dict:
         from ssm_phylo.models.losses import mre_loss
 
+        _t0 = time.time()
         losses, pred, dm, _scales = self._forward(batch)
+        _t_fwd = time.time() - _t0
         loss = losses["loss"]
         if self.scaler.is_enabled():
             self.scaler.scale(loss).backward()
@@ -684,6 +686,8 @@ class Trainer:
             "mae_norm": float(losses["mae_norm"].detach()),
             "mre": float(mre_loss(pred.float(), dm).detach()),
             "fp_penalty": float(losses["four_point"].detach()),
+            "t_fwd": _t_fwd,
+            "t_bwd": time.time() - _t0,
         }
 
     def validate(self) -> dict:
@@ -754,26 +758,36 @@ class Trainer:
         ceiling = float(self.cfg.get("hard_loss_ceiling", 100.0))
         if self._resumed_from:
             self._stop_requested = False
-        log.info("training start: %d samples, batch %d, max_epochs %d, max_steps %d",
-                 len(self.train_ds), self.batch_size, max_epochs, max_steps)
         batches = self._iter_batches()
         steps_per_epoch = max(1, math.ceil(len(self.train_ds) / self.batch_size))
+        finite_steps = max_steps < (1 << 62)
+        total_steps = max_steps if finite_steps else max_epochs * steps_per_epoch
+        log.info("training start: %d samples, batch %d, max_epochs %d, up to %d steps%s",
+                 len(self.train_ds), self.batch_size, max_epochs, total_steps,
+                 "" if finite_steps else " (max_steps unset)")
         wall0 = time.time()
         t_step = wall0
         ema_ms: float | None = None
         epoch_loss_sum = 0.0
         epoch_loss_n = 0
-        finite_steps = max_steps < (1 << 62)
-        total_steps = max_steps if finite_steps else max_epochs * steps_per_epoch
         log_every = max(1, int(self.cfg.get("log_every", 10)))
+        _warned_slow = False
         while self.epoch < max_epochs and self.global_step < max_steps:
+            _t_coll0 = time.time()
             try:
                 batch = next(batches)
             except StopIteration:
                 break
+            t_coll = time.time() - _t_coll0
             self.model.train()
             if self.args.smoke_step_delay:
                 time.sleep(self.args.smoke_step_delay)
+            if self.global_step == 0:
+                log.info(
+                    "step 1: collated in %.2fs (tokens %s); running forward+backward. "
+                    "NOTE: the eager-Mamba fallback is sequential — at large sizes the "
+                    "first step can take minutes; you WILL see step 1 when it completes.",
+                    t_coll, tuple(batch[0].shape))
             row = self.train_step(batch)
             self.global_step += 1
             self.epoch = self.global_step // steps_per_epoch
@@ -781,9 +795,17 @@ class Trainer:
             row["step"] = self.global_step
             row["epoch"] = self.epoch
             row["lr"] = self.scheduler.get_lr()
+            row["t_coll"] = t_coll
             ms = (time.time() - t_step) * 1000.0
             t_step = time.time()
             ema_ms = ms if ema_ms is None else 0.95 * ema_ms + 0.05 * ms
+            if not _warned_slow and row["t_fwd"] > 60.0:
+                _warned_slow = True
+                log.warning(
+                    "forward pass took %.1fs (d_model=%s, stream len %d) — sequential "
+                    "eager-Mamba is very slow at this size; training will be impractically "
+                    "slow without fused kernels. Consider train_small or reducing max_seq_len.",
+                    row["t_fwd"], self.cfg.get("d_model", "?"), batch[0].shape[1])
             epoch_loss_sum += row["loss"]
             epoch_loss_n += 1
             if self.global_step % steps_per_epoch == 0:
@@ -799,10 +821,11 @@ class Trainer:
                 eta_s = (ema_ms / 1000.0) * remaining
                 log.info(
                     "step %d/%d (epoch %d/%d, %.1f%%) loss=%.4f mae=%.4f mae_norm=%.4f "
-                    "fp=%.4f lr=%.2e | %.0fms/step ETA %dm%02ds",
+                    "fp=%.4f lr=%.2e | %.0fms/step (fwd %.1fs bwd %.1fs coll %.2fs) ETA %dm%02ds",
                     self.global_step, total_steps, self.epoch, max_epochs, frac,
                     row["loss"], row["mae"], row["mae_norm"], row["fp_penalty"],
-                    row["lr"], ema_ms, int(eta_s // 60), int(eta_s % 60))
+                    row["lr"], ema_ms, row["t_fwd"], row["t_bwd"], row["t_coll"],
+                    int(eta_s // 60), int(eta_s % 60))
             if self.global_step % int(self.cfg.get("save_every", 250)) == 0:
                 self.save_checkpoint()
             if self.global_step % int(self.cfg.get("val_every", 500)) == 0:
