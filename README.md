@@ -142,15 +142,20 @@ dataset is final).
 
 ## How to run on Colab
 
-1. **Setup** (runs from a terminal cell):
-   `bash scripts/colab_setup.sh` — mounts Drive, sources `$COLAB_DRIVE/.env`,
-   creates dirs, installs pinned deps, attempts fused mamba on sm_80+.
-2. `bash scripts/download_weights.sh` — ProtMamba weights into
-   `$PROT_MAMBA_CKPT` (idempotent, locked against concurrent downloads).
-3. `bash scripts/simulate_big.sh` — simulate >=100k unaligned pairs into
-   scratch, consolidate + split, copy parquet to Drive (resumable).
-4. Notebooks `01_simulate_data`, `02_train`, `03_evaluate` (added in later
-   phases) — thin wrappers around the `ssm_phylo` package.
+**Single entry point: [`notebooks/V1_Colab.ipynb`](notebooks/V1_Colab.ipynb)** — one
+notebook that runs the whole V1 flow in a single VM (setup → simulate small
+data → train → evaluate). Colab gives every notebook a fresh VM, so the
+environment does NOT persist between notebooks; run everything in one.
+
+1. Open `notebooks/V1_Colab.ipynb` in Colab and run Section 1 (setup).
+2. Run Section 2 (simulate small data), Section 3 (train; `--resume latest`
+   makes re-runs resume after session death), Section 4 (evaluate).
+3. Every cell is idempotent — re-running never duplicates work.
+
+The old per-phase notebooks (`00_setup` … `03_evaluate`) are kept for
+reference/CI only. For full-scale data, `scripts/simulate_big.sh` generates
+≥100k pairs (resumable); `scripts/colab_train.sh` trains with
+`configs/train_l4.yaml`.
 
 ## How to run locally
 

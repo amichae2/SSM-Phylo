@@ -59,6 +59,37 @@ def test_predict_blockwise_equals_full(model):
     assert np.allclose(full, block, atol=1e-5)
 
 
+def test_predict_blockwise_partial_blocks_match_full(model):
+    """Blockwise scatter must equal the single-block path for chunk sizes
+    that do not divide n (partial final j-block), including chunk=1 and
+    chunk >= n. Regression guard for the clamped-slice scatter."""
+    tok = get_tokenizer()
+    device = torch.device("cpu")
+    for n, chunk in [(10, 3), (11, 4), (5, 2), (7, 7), (8, 5), (6, 1), (9, 10**6)]:
+        seqs = random_seqs(n=n, length=30, seed=n)
+        full = predict_distances(model, seqs, tok, device=device, chunk=10**6)
+        block = predict_distances(model, seqs, tok, device=device, chunk=chunk)
+        assert np.allclose(full, block, atol=1e-5), f"n={n} chunk={chunk}"
+
+
+def test_predict_partial_last_block_no_column_duplication(model):
+    """The partial final j-block must not silently duplicate a column.
+
+    n=10, chunk=3 -> j-blocks of width 3/3/3/1: the last (partial) block
+    writes only column 9. If the scatter over-wrote with a repeated column,
+    dm[:, 9] would equal dm[:, 8]; they are different pairs and must differ.
+    """
+    seqs = random_seqs(n=10, length=30, seed=3)
+    tok = get_tokenizer()
+    device = torch.device("cpu")
+    dm = predict_distances(model, seqs, tok, device=device, chunk=3)
+    assert dm.shape == (10, 10)
+    assert not np.allclose(dm[:, 9], dm[:, 8], atol=1e-5), (
+        "partial last block duplicated column 8 into column 9"
+    )
+    assert not np.allclose(dm[9, :], dm[8, :], atol=1e-5)
+
+
 def test_predict_matches_model_forward(model):
     seqs = random_seqs(n=5, length=20)
     tok = get_tokenizer()

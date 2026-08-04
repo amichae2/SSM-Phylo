@@ -78,19 +78,26 @@ def predict_distances(
         raw = torch.zeros(n, n, dtype=embs.dtype, device=device)
         for i0 in range(0, n, chunk):
             ei = embs[i0 : i0 + chunk].unsqueeze(0)
+            ci = ei.shape[1]
             for j0 in range(i0, n, chunk):
                 ej = embs[j0 : j0 + chunk].unsqueeze(0)
-                ci = ei.shape[1]
-                raw[i0 : i0 + ci, j0 : j0 + ei.shape[1]] = (
-                    model.head._score_blocks(ei, ej)[0]
-                )
+                cj = ej.shape[1]
+                # ci >= cj always (i0 <= j0 => n-i0 >= n-j0), so the upper
+                # triangle write is shape-safe; the explicit clamps + assert
+                # make this invariant obvious and robust to future edits.
+                i1 = min(i0 + ci, n)
+                j1 = min(j0 + cj, n)
+                upper = model.head._score_blocks(ei, ej)[0]   # (ci, cj)
+                assert upper.shape == (ci, cj), upper.shape
+                raw[i0:i1, j0:j1] = upper
                 if i0 != j0:
-                    # The head is NOT symmetric (untied bilinear W, asymmetric
-                    # MLP inputs), so the lower triangle needs the ROLE-SWAPPED
-                    # score s_{j,i} — a transposed copy of s_{i,j} would be wrong.
-                    raw[j0 : j0 + ei.shape[1], i0 : i0 + ci] = (
-                        model.head._score_blocks(ej, ei)[0]
-                    )
+                    # Head is NOT symmetric pre-postprocess (untied bilinear W,
+                    # asymmetric MLP inputs): lower triangle needs the
+                    # role-swapped score s_{j,i} from (ej, ei), NOT a transpose
+                    # of s_{i,j}.
+                    lower = model.head._score_blocks(ej, ei)[0]  # (cj, ci)
+                    assert lower.shape == (cj, ci), lower.shape
+                    raw[j0:j1, i0:i1] = lower
         dist = model.head.postprocess(raw)
         return (dist * scale).cpu().numpy().astype(np.float32)
 
