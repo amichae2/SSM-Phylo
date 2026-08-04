@@ -18,11 +18,17 @@
 #      dev/smoke only.
 #
 # Usage: pip install -r requirements-colab.txt
+#
+# Pin policy: torch / numpy / transformers use FLOOR pins (>=) because Colab
+# ships newer versions already. Strict pins would force a multi-GB torch
+# re-download and a numpy downgrade on every fresh VM session. The strict
+# pins live in pyproject.toml (reproducibility); this file keeps the Colab
+# session fast.
 
-torch==2.3.1
-transformers==4.44.2
+torch>=2.3.1
+transformers>=4.44.2,<5
 datasets==2.10.1
-numpy==1.24.4
+numpy>=1.24.4
 pandas
 pyarrow
 scipy

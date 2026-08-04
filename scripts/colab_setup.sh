@@ -8,8 +8,9 @@
 #   2. Mounts Google Drive when COLAB_DRIVE is set and google.colab is present,
 #      then sources $COLAB_DRIVE/.env (mirrored to /content/ssm-phylo/.env).
 #   3. Creates the persistent/scratch directory layout.
-#   4. Installs pinned deps from requirements-colab.txt (skipped if torch is
-#      already importable -> idempotent).
+#   4. Installs deps from requirements-colab.txt (ALWAYS run — pip is
+#      idempotent, satisfied pins are fast no-ops), then installs the
+#      ssm_phylo package itself with `pip install -e .` (src layout).
 #   5. On sm_80+ only: attempts `pip install mamba-ssm==2.1.0 --no-build-isolation`
 #      with a 15-minute timeout; on any failure prints "FALLBACK: eager Mamba"
 #      and continues.
