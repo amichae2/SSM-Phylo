@@ -1,0 +1,15 @@
+# train_l4.yaml — L4-24GB production overrides (merges over configs/default.yaml).
+# Colab Pro default: bf16, grad checkpointing, 32k-token streams.
+
+max_seq_len: 32768
+batch_size: 4
+grad_checkpointing: true
+precision: bf16
+save_every: 250
+val_every: 500
+max_epochs: 20
+warmup_steps: 500
+lr: 0.0006
+scheduler: constant
+loss: mae
+four_point_lambda: 0.01

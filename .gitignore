@@ -1,0 +1,48 @@
+# ---- python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.eggs/
+
+# ---- tooling caches ----
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# ---- virtualenvs ----
+.venv/
+venv/
+env/
+
+# ---- secrets (local env; .env.example is the template) ----
+.env
+
+# ---- generated checkpoints / weights ----
+*.pt
+*.ckpt
+*.safetensors
+*.bin
+
+# ---- local scratch / results (paths are normally env-driven; keep the repo clean) ----
+data/
+ckpts/
+checkpoints/
+results/
+logs/
+nohup.out
+
+# ---- vendored third-party simulation code (copied at runtime from PHYLOFORMER_DIR) ----
+scripts/vendor/
+
+# ---- editors / OS ----
+.idea/
+.vscode/
+.DS_Store
+
+# ---- experiment tracking local dirs ----
+wandb/
+runs/

@@ -1,0 +1,10 @@
+# train_small.yaml — dev/smoke overrides for quick iteration on T4 (free tier).
+# Merges over configs/default.yaml; CLI flags override everything.
+
+max_seq_len: 8192
+batch_size: 2
+max_epochs: 2
+num_train_alignments: 5000
+precision: fp16             # T4 is sm_75 -> fp16
+grad_checkpointing: true
+use_fused_mamba: false      # T4: eager Mamba fallback path

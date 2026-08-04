@@ -1,0 +1,76 @@
+# default.yaml — sane defaults for all model/training/eval knobs.
+# Configs merge over this file; CLI flags override YAML (see src/ssm_phylo/config.py).
+
+# ---- model (ProtMamba encoder, reused as-is; only the task head is trained) ----
+d_model: 1024
+n_layer: 16
+vocab_size: 38
+encoder:
+  kind: from_scratch        # from_scratch | degraded_protmamba | ptm_mamba
+                            # from_scratch = HF eager MambaForCausalLM, random
+                            # weights, license-clean, CI-safe (default)
+                            # degraded_protmamba = ProtMamba v1.0 backbone via
+                            # checkpoint_compat.py (see AGENTS.md known issue)
+                            # ptm_mamba = dormant (no public weights + cc-by-nc-nd)
+  checkpoint_dir: null      # degraded_protmamba only; null = $PROT_MAMBA_CKPT env
+  mamba:
+    state_size: 16
+    time_step_rank: 64      # transformers MambaConfig kwarg (dt_rank)
+    conv_kernel: 4
+    expand: 2
+  ptm_model_id: programmablebio/ptm-mamba
+d_emb: 256                  # projection dim for per-sequence embeddings
+pooling: attention          # attention | mean | max
+head: bilinear_mlp          # bilinear_mlp | mlp
+max_dist: 3.0               # distance cap applied at the output (softplus)
+use_fused_mamba: true       # false forces eager Mamba fallback
+
+# ---- loss / regularizers ----
+loss: mae                   # mae (base) | mre (fine-tune)
+four_point_lambda: 0.01     # soft four-point-condition regularizer (0 disables)
+sample_quartets: true       # sampled quartets when n_tips > 40
+
+# ---- training ----
+lr: 0.0006
+weight_decay: 0.1
+betas: [0.9, 0.95]
+warmup_steps: 500
+scheduler: constant
+max_seq_len: 32768
+max_steps: null              # null = train until max_epochs
+batch_size: 2
+grad_checkpointing: true
+precision: bf16              # bf16 (sm_80+) | fp16 (T4 dev/smoke) | fp32 (CPU); auto-downgrades
+max_grad_norm: 1.0
+grad_accum: 1
+save_every: 250              # steps; checkpoints land in LOCAL_CKPT_DIR
+val_every: 500               # steps
+max_epochs: 20
+early_stop_patience: 5       # val checks without improvement before stopping
+hard_loss_ceiling: 100.0     # abort if loss exceeds this (Phyloformer guardrail)
+save_total_limit: 10         # numbered checkpoints kept in LOCAL_CKPT_DIR
+bucket_step: 512             # collate bucketing granularity (tokens)
+seed: 42
+
+# ---- data ----
+num_train_alignments: null  # null = use all rows in train.parquet
+num_workers: 4
+pin_memory: true
+
+# ---- eval ----
+eval_metric: kf             # kf = Kuhner-Felsenstein / Robinson-Foulds on FastME tree
+eval_n_taxa: [10, 20, 40, 80, 160]
+
+# ---- storage ----
+# null = resolved from env vars (COLAB_DRIVE / DATA_DIR / CKPT_DIR / RESULTS_DIR).
+data_dir: null
+ckpt_dir: null
+results_dir: null
+local_ckpt_dir: null        # null = $LOCAL_CKPT_DIR env (scratch)
+local_data_dir: null        # null = $LOCAL_DATA_DIR env (scratch)
+
+# ---- misc ----
+wandb_project: ssm-phylo
+log_every: 10               # steps
+log: file                   # extra logger: wandb | tensorboard | file | none (CSV always)
+name: null                  # run name (wandb + logs subdir)

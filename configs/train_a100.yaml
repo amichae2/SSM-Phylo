@@ -1,0 +1,15 @@
+# train_a100.yaml — A100-40GB overrides (merges over configs/default.yaml).
+# Same schedule as train_l4 with longer streams (64k tokens).
+
+max_seq_len: 65536
+batch_size: 4
+grad_checkpointing: true
+precision: bf16
+save_every: 250
+val_every: 500
+max_epochs: 20
+warmup_steps: 500
+lr: 0.0006
+scheduler: constant
+loss: mae
+four_point_lambda: 0.01

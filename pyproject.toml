@@ -1,0 +1,66 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ssm-phylo"
+version = "0.1.0"
+description = "SSM distance estimator for phylogenetic trees from unaligned sequences (ProtMamba encoder + task head)."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "Apache-2.0" }
+dependencies = [
+    "torch==2.3.1",
+    "transformers==4.44.2",
+    # NOTE: mamba-ssm is an OPTIONAL dependency. It must NEVER be imported at
+    # package import time: wrap every import in try/except and fall back to
+    # transformers' eager Mamba (see requirements-colab.txt for the Colab
+    # install strategy). It is deliberately NOT in [project].dependencies so a
+    # fresh env can install and import this package without compiling CUDA.
+    "datasets==2.10.1",
+    "numpy==1.24.4",
+    "pandas",
+    "pyarrow",
+    "scipy",
+    "scikit-learn",
+    "biopython",
+    "dendropy==5.0.10",
+    "tqdm",
+    "PyYAML",
+    "wandb",
+    "tensorboard",
+]
+
+[project.optional-dependencies]
+# Fused kernel extras. causal-conv1d is a build-time dep of mamba-ssm when
+# building from source; both are optional and GPU/CUDA-build specific.
+cuda = [
+    "causal-conv1d",
+    "mamba-ssm==2.1.0",
+]
+dev = [
+    "pytest",
+    "ruff",
+    "mypy",
+]
+
+[project.scripts]
+ssm-phylo = "ssm_phylo.train:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"ssm_phylo" = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true

@@ -1,0 +1,37 @@
+# Colab installation order matters: causal-conv1d first (mamba-ssm build dep),
+# then mamba-ssm last (it pins/builds against the already-installed torch).
+#
+# Colab fallback strategy (AGENTS.md constraint 4):
+#   1. Install everything here EXCEPT mamba-ssm first (fast, wheel-based).
+#   2. On sm_80+ GPUs (A100/L4/H100) attempt, separately:
+#        pip install mamba-ssm==2.1.0 --no-build-isolation
+#      with a 15-minute timeout (see scripts/colab_setup.sh).
+#   3. If that install fails (missing ninja/CUDA toolchain, timeout, ...),
+#      the pipeline falls back to HuggingFace transformers' EAGER Mamba
+#      (MambaForCausalLM). Never let the install block the pipeline.
+#   4. bf16 is used only on sm_80+; T4 (sm_75) falls back to fp16 and is
+#      dev/smoke only.
+#
+# Usage: pip install -r requirements-colab.txt
+
+torch==2.3.1
+transformers==4.44.2
+datasets==2.10.1
+numpy==1.24.4
+pandas
+pyarrow
+scipy
+scikit-learn
+biopython
+dendropy==5.0.10
+tqdm
+PyYAML
+wandb
+tensorboard
+pytest
+ruff
+mypy
+
+# --- CUDA kernel extras (optional, install via scripts/colab_setup.sh) ---
+# causal-conv1d
+# mamba-ssm==2.1.0  (build from source: pip install mamba-ssm==2.1.0 --no-build-isolation)
