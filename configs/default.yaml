@@ -23,7 +23,6 @@ d_emb: 256                  # projection dim for per-sequence embeddings
 pooling: attention          # attention | mean | max
 head: bilinear_mlp          # bilinear_mlp | mlp
 max_dist: 3.0               # distance cap applied at the output (softplus)
-use_fused_mamba: true       # false forces eager Mamba fallback
 
 # ---- loss / regularizers ----
 loss: mae                   # mae (base) | mre (fine-tune)

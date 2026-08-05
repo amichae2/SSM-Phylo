@@ -77,6 +77,16 @@ Golden rules:
    pairs and symmetrize, or tie weights. Apply softplus before output.
 8. All new Python lives under src/ssm_phylo/ with tests in tests/.
    Code must run headless (no notebook-only logic); notebooks are thin wrappers.
+9. Never default to full 20-epoch schedules for validation. Use
+   configs/validate.yaml (or --max-epochs overrides) for end-to-end checks —
+   the notebook's Section 3 defaults to run_mode="validate".
+10. Fused Mamba kernels (mamba-ssm) are the ONLY big speed lever (3-8x+);
+    they require an exact-pins fresh-runtime install
+    (scripts/setup_fused_kernels.sh, torch 2.3.1/transformers 4.44.2 — it
+    DOWNGRADES both; ~20-30 min one-time, never mid-session). Eager Mamba is
+    the default and is CPU-bound (GPU idle, minutes/step at 100M): document
+    this, never silently let a user start a 20-epoch eager run as if it were
+    quick.
 
 ## Key reference facts (from the source repos)
 - ProtMamba config: d_model=1024, n_layer=16, vocab_size=38, bf16,

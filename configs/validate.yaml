@@ -1,0 +1,9 @@
+# validate.yaml — VALIDATION MODE: real model, short schedule. Use for
+# end-to-end checks (minutes on eager Mamba, not days). Full training uses
+# train_l4/train_a100 (20 epochs). Merges over configs/default.yaml.
+
+max_epochs: 2
+save_every: 20
+val_every: 40
+early_stop_patience: 3
+log_every: 5

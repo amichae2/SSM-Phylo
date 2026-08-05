@@ -157,6 +157,31 @@ reference/CI only. For full-scale data, `scripts/simulate_big.sh` generates
 ≥100k pairs (resumable); `scripts/colab_train.sh` trains with
 `configs/train_l4.yaml`.
 
+## Why is training slow? / Making it fast
+
+**The short version:** the default runtime uses transformers' **eager Mamba**,
+whose sequential scan runs on the **CPU** — the GPU sits idle while a 100M-param
+step can take ~minutes. 20 epochs on eager Mamba ≈ **1.7 days**. The fused
+Mamba kernels (mamba-ssm) move the scan onto the GPU (**3-8x+ faster**, days →
+hours) and are the *only* big speed lever.
+
+**The recipe:**
+
+1. **For any check** (does it run? does the loss go down?): use **VALIDATION
+   MODE** — in the notebook, Section 3's `run_mode` toggle defaults to
+   `"validate"`, which trains the real 100M model for just 2 epochs via
+   `configs/validate.yaml` (minutes even on eager Mamba). Never run a full
+   20-epoch schedule just to validate.
+2. **Before real training**: start a **fresh** Colab runtime and run
+   `bash scripts/setup_fused_kernels.sh` (one-time, ~20-30 min; it
+   **downgrades** torch/transformers to 2.3.1/4.44.2 — that is why it must be
+   a fresh runtime and never mid-session). Then run
+   `train_l4`/`train_a100` as usual.
+
+If you stay on eager Mamba: early stopping (`early_stop_patience`) and fewer
+epochs (`--max-epochs`) are your friends, and the notebook prints the
+expected-runtime notice before every full-schedule run.
+
 ## How to run locally
 
 ```bash
