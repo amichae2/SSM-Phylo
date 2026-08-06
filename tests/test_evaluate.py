@@ -88,7 +88,16 @@ def test_tree_distances_rf_positive_permuted(tmp_path):
     _write_newick(str(a), "((s1,s2),(s3,(s4,(s5,s6))));")
     _write_newick(str(b), "((s1,s6),(s5,(s4,(s3,s2))));")
     rf = tree_distances(str(a), str(b))
-    assert 0.0 < rf <= 1.0
+    assert rf > 0.8  # fully permuted 6-tip tree: true RF ≈ 1.0
+
+
+def test_tree_distances_rf_max_is_one(tmp_path):
+    cat = tmp_path / "cat.nwk"
+    bal = tmp_path / "bal.nwk"
+    _write_newick(str(cat), "(((((((s1,s2),s3),s4),s5),s6),s7),s8);")
+    _write_newick(str(bal), "(((s1,s5),(s2,s6)),((s3,s7),(s4,s8)));")
+    rf = tree_distances(str(cat), str(bal))
+    assert rf > 0.9  # caterpillar vs balanced 8-tip: shares no splits -> ≈ 1.0
 
 
 def test_tree_distances_unsupported_metric(tmp_path):

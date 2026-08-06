@@ -51,7 +51,13 @@ def _patristic_matrix(newick: str) -> np.ndarray:
 
 
 def tree_distances(tree1_path: str, tree2_path: str, metric: str = "rf") -> float:
-    """Normalized Robinson-Foulds distance (0..1) between two Newick files."""
+    """Normalized Robinson-Foulds distance (0..1) between two Newick files.
+
+    dendropy's symmetric_difference already counts each differing split once
+    (the unweighted RF count; max 2*(n_tips-3) for binary trees), so no extra
+    halving. Normalized RF is 0 for identical trees and 1.0 for trees sharing
+    no splits; the min(1.0, ...) guard absorbs polytomous-tree noise.
+    """
     if metric != "rf":
         raise NotImplementedError(
             f"metric {metric!r} comes with the baselines phase; v1 supports only 'rf'"
@@ -63,7 +69,7 @@ def tree_distances(tree1_path: str, tree2_path: str, metric: str = "rf") -> floa
     max_rf = max(1, 2 * (n_tips - 3))  # unweighted RF max for binary trees
     from dendropy.calculate import treecompare
 
-    rf = treecompare.symmetric_difference(t1, t2) / 2.0
+    rf = treecompare.symmetric_difference(t1, t2)
     return float(min(1.0, rf / max_rf))
 
 
