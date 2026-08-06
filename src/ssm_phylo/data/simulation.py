@@ -24,6 +24,7 @@ Every function is resumable/idempotent and logs progress every 100 files.
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import hashlib
 import os
 import random
@@ -785,6 +786,112 @@ def cmd_clean(args: argparse.Namespace) -> int:
     return 0
 
 
+# --------------------------------------------------------------------------- #
+# big grid (scripts/simulate_big.sh) + shared parallel helpers
+# --------------------------------------------------------------------------- #
+TIP_COUNTS = [10, 20, 40, 80, 160, 320, 640, 1280]
+TREES_PER_BIN = 200
+LENGTHS = [150, 300, 600]
+REPLICATES = 21
+
+
+def _chunk(seq: Sequence, n: int) -> list[list]:
+    """Split seq into n roughly equal disjoint chunks (non-empty)."""
+    k, m = divmod(len(seq), n)
+    out: list[list] = []
+    i = 0
+    for j in range(n):
+        size = k + (1 if j < m else 0)
+        out.append(list(seq[i:i + size]))
+        i += size
+    return [c for c in out if c]
+
+
+def _sim_alignment_task(task: tuple) -> int:
+    """Worker entry for ProcessPoolExecutor: simulate one stem subset.
+
+    Task = (tree_dir, out_dir, length, seed, engine, indels, stems).
+    simulate_alignments is per-stem idempotent (skips existing .fasta) and
+    uses per-stem tmp dirs, so parallel calls over DISJOINT stem subsets are
+    safe. Seeded deterministically per stem, so results are reproducible
+    regardless of worker/partition layout.
+    """
+    tree_dir, out_dir, length, seed, engine, indels, stems = task
+    simulate_alignments(
+        tree_dir, out_dir, length=length, seed=seed, engine=engine,
+        indels=indels, stems=stems,
+    )
+    return len(stems)
+
+
+def _run_alignment_phase(raw: str, stems: list[str], length: int,
+                         seed: int, engine: str, indels: bool, workers: int) -> None:
+    """simulate_alignments over `stems`, split into disjoint worker chunks."""
+    if workers > 1 and len(stems) > 1:
+        tasks = [(raw, raw, length, seed, engine, indels, ch)
+                 for ch in _chunk(stems, workers)]
+        with concurrent.futures.ProcessPoolExecutor(max_workers=workers) as ex:
+            for _ in ex.map(_sim_alignment_task, tasks):
+                pass
+    else:
+        simulate_alignments(raw, raw, length=length, seed=seed,
+                            engine=engine, indels=indels, stems=stems)
+
+
+def _print_split_rows(data_dir: str) -> None:
+    print("[big] split row counts (real):")
+    for name in ("train.parquet", "val.parquet", "test.parquet"):
+        path = os.path.join(data_dir, name)
+        if os.path.exists(path):
+            print(f"  {name}: {pq.read_table(path).num_rows} rows")
+
+
+def cmd_big(args: argparse.Namespace) -> int:
+    """The full simulation grid: 8 tip counts x 200 trees/bin x 3 lengths x 21
+    replicates = 100,800 (tree, alignment) pairs, written to LOCAL scratch
+    ONLY, then consolidated + split onto Drive atomically (see
+    scripts/simulate_big.sh)."""
+    local = os.path.abspath(args.local_data_dir or _env("LOCAL_DATA_DIR") or "/content/data")
+    data_dir = args.data_dir or _env("DATA_DIR")
+    if not data_dir:
+        raise SystemExit("no data dir: set DATA_DIR or pass --data-dir")
+    raw = os.path.join(local, "raw")
+    os.makedirs(raw, exist_ok=True)
+
+    tip_counts = [int(x) for x in str(args.tip_counts).split(",") if x.strip()]
+    lengths = [int(x) for x in str(args.lengths).split(",") if x.strip()]
+    if not tip_counts or not lengths or args.trees_per_bin < 1 or args.replicates < 1:
+        raise SystemExit("bad grid: need >=1 tip count, >=1 length, trees-per-bin >= 1, replicates >= 1")
+    bins: list[tuple[int, int, list[str]]] = []
+    for tips in tip_counts:
+        for length in lengths:
+            for rep in range(args.replicates):
+                stems = [f"t{tips:03d}_l{length}_r{rep:02d}_{i:06d}"
+                         for i in range(args.trees_per_bin)]
+                bins.append((tips, length, stems))
+    total = len(bins) * args.trees_per_bin
+    print(f"[big] grid: {len(tip_counts)} tip counts x {len(lengths)} lengths x "
+          f"{args.replicates} replicates x {args.trees_per_bin} trees "
+          f"= {total} (tree, alignment) pairs")
+    if args.resume:
+        print("[big] resume mode: already-present stems are skipped (idempotent)")
+
+    for i, (tips, _length, stems) in enumerate(bins):
+        print(f"[big] trees bin {i + 1}/{len(bins)}: tips={tips}")
+        simulate_trees(tips, args.trees_per_bin, raw, seed=args.seed, stems=stems)
+
+    for i, (_tips, length, stems) in enumerate(bins):
+        print(f"[big] alignments bin {i + 1}/{len(bins)}: length={length} "
+              f"({args.workers} worker(s))")
+        _run_alignment_phase(raw, stems, length, args.seed, args.engine,
+                             args.indels, args.workers)
+
+    print("[big] consolidating + splitting -> Drive")
+    make_splits(raw, data_dir, seed=args.seed)
+    _print_split_rows(data_dir)
+    return 0
+
+
 def cmd_smoke(args: argparse.Namespace) -> int:
     """200 alignments end-to-end: trees -> alignments -> splits -> 'Drive'."""
     local = os.path.abspath(args.local_data_dir or _env("LOCAL_DATA_DIR") or "/content/data")
@@ -796,7 +903,8 @@ def cmd_smoke(args: argparse.Namespace) -> int:
     stems = [f"t020_{i:06d}" for i in range(200)]
     print(f"[smoke] simulating {len(stems)} trees (tips=20, length=150) into {raw}")
     simulate_trees(20, 200, raw, seed=args.seed, stems=stems)
-    simulate_alignments(raw, raw, length=150, seed=args.seed, engine=args.engine, stems=stems)
+    _run_alignment_phase(raw, stems, 150, args.seed, args.engine,
+                         getattr(args, "indels", False), getattr(args, "workers", 1))
     print("[smoke] consolidating + splitting -> Drive")
     make_splits(raw, data_dir, seed=args.seed)
     _print_parquet_sizes(data_dir)
@@ -875,9 +983,28 @@ def build_parser() -> argparse.ArgumentParser:
     sm = sub.add_parser("smoke", help="200-alignment end-to-end smoke run")
     sm.add_argument("--data-dir", default=None)
     sm.add_argument("--local-data-dir", default=None)
+    sm.add_argument("--workers", type=int, default=1,
+                    help="parallelize the 200 alignments across N processes (default 1)")
     sm.add_argument("--engine", default="auto", choices=["auto", "alisim", "python"])
     sm.add_argument("--seed", type=int, default=42)
     sm.set_defaults(func=cmd_smoke)
+
+    bg = sub.add_parser("big", help="full simulation grid (scripts/simulate_big.sh)")
+    bg.add_argument("--data-dir", default=None)
+    bg.add_argument("--local-data-dir", default=None)
+    bg.add_argument("--workers", type=int, default=4)
+    bg.add_argument("--resume", action="store_true",
+                    help="skip stems already present in scratch (idempotent)")
+    bg.add_argument("--engine", default="auto", choices=["auto", "alisim", "python"])
+    bg.add_argument("--tip-counts", default=",".join(str(x) for x in TIP_COUNTS),
+                    help="comma-separated tip counts (default 10,20,...,1280)")
+    bg.add_argument("--trees-per-bin", type=int, default=TREES_PER_BIN)
+    bg.add_argument("--lengths", default=",".join(str(x) for x in LENGTHS),
+                    help="comma-separated alignment lengths (default 150,300,600)")
+    bg.add_argument("--replicates", type=int, default=REPLICATES)
+    bg.add_argument("--indels", action="store_true")
+    bg.add_argument("--seed", type=int, default=42)
+    bg.set_defaults(func=cmd_big)
 
     return p
 

@@ -34,6 +34,7 @@ BACKGROUND=0
 WORKERS=4
 DATA_DIR_FLAG=""
 LOCAL_DATA_DIR_FLAG=""
+EXTRA_FLAGS=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -43,8 +44,12 @@ while [ $# -gt 0 ]; do
     --workers)   WORKERS="${2:-4}"; shift ;;
     --data-dir)  DATA_DIR_FLAG="${2:-}"; shift ;;
     --local-data-dir) LOCAL_DATA_DIR_FLAG="${2:-}"; shift ;;
+    # grid knobs, passed straight through to the python CLI:
+    --tip-counts|--trees-per-bin|--lengths|--replicates|--engine|--seed)
+      EXTRA_FLAGS="$EXTRA_FLAGS $1 ${2:-}"; shift ;;
+    --indels)    EXTRA_FLAGS="$EXTRA_FLAGS $1" ;;
     -h|--help)
-      say "usage: simulate_big.sh [--smoke] [--resume] [--background] [--workers N] [--data-dir DIR] [--local-data-dir DIR]"
+      say "usage: simulate_big.sh [--smoke] [--resume] [--background] [--workers N] [--data-dir DIR] [--local-data-dir DIR] [--tip-counts L] [--trees-per-bin N] [--lengths L] [--replicates N] [--engine E] [--indels] [--seed N]"
       exit 0 ;;
     *) warn "unknown arg '$1'"; exit 1 ;;
   esac
@@ -70,7 +75,7 @@ elif [ -x "$REPO_DIR/.venv/bin/python" ]; then
   PYTHON_BIN="$REPO_DIR/.venv/bin/python"
 fi
 
-PY_ARGS="--workers $WORKERS"
+PY_ARGS="--workers $WORKERS$EXTRA_FLAGS"
 [ -n "$DATA_DIR_FLAG" ]       && PY_ARGS="$PY_ARGS --data-dir $DATA_DIR_FLAG"
 [ -n "$LOCAL_DATA_DIR_FLAG" ] && PY_ARGS="$PY_ARGS --local-data-dir $LOCAL_DATA_DIR_FLAG"
 
