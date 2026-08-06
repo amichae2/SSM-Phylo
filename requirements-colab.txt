@@ -39,6 +39,7 @@ pytest
 ruff
 mypy
 
-# --- Speed extra (NOT installed by this file; installed non-fatally by
+# --- Speed extras (NOT installed by this file; installed non-fatally by
 # --- scripts/colab_setup.sh — fast wheels, safe anytime, never required):
 # kernels
+# mambapy

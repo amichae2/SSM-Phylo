@@ -11,8 +11,8 @@
 #   4. Installs deps from requirements-colab.txt (ALWAYS run — pip is
 #      idempotent, satisfied pins are fast no-ops), then installs the
 #      ssm_phylo package itself with `pip install -e . --no-deps` (src layout).
-#   5. Installs HuggingFace's `kernels` (optional fused-kernel speedup, fast
-#      wheels, safe anytime). Non-fatal: without it the pipeline runs on
+#   5. Installs HuggingFace's `kernels` + `mambapy` (optional speedups, fast
+#      wheels, safe anytime). Non-fatal: without them the pipeline runs on
 #      transformers' eager Mamba. The old fused-kernel package is obsolete and never used.
 #
 # Exit code is ALWAYS 0. Safe to run twice.
@@ -156,6 +156,17 @@ if python -m pip install kernels -q; then
   say "kernels installed — transformers 5.x will use the fused fast path."
 else
   warn "kernels not available — eager Mamba fallback (fine for validation)."
+fi
+
+# mamba.py pure-PyTorch backend: parallel-scan fast path that works on modern
+# torch (no compiled kernels); enables use_mambapy in the MambaConfig. PyPI
+# distribution name is `mambapy` (imports as `mambapy`). Same fail-soft
+# pattern — without it transformers falls back to eager Mamba.
+say "Installing mambapy (optional mamba.py fast path)..."
+if python -m pip install mambapy -q; then
+  say "mambapy installed — mamba.py parallel-scan backend available."
+else
+  warn "mambapy not available — eager Mamba fallback (fine for validation)."
 fi
 
 say "Setup complete."

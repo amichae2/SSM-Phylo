@@ -31,12 +31,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Speed extra — HuggingFace's `kernels` fused kernels (fast wheels, safe
-# anytime; transformers 5.x auto-detects them). NEVER required: the pipeline
-# runs fully on the eager Mamba fallback, and mamba-ssm is obsolete (does not
-# build on modern torch). colab_setup.sh installs kernels non-fatally.
+# Speed extras — HuggingFace's `kernels` fused kernels (fast wheels, safe
+# anytime; transformers 5.x auto-detects them) and `mambapy` (mamba.py
+# pure-PyTorch parallel-scan backend, no compiled kernels). NEVER required:
+# the pipeline runs fully on the eager Mamba fallback, and the old fused-kernel
+# package is obsolete (does not build on modern torch). colab_setup.sh installs
+# both non-fatally.
 cuda = [
     "kernels",
+    "mambapy",
 ]
 dev = [
     "pytest",

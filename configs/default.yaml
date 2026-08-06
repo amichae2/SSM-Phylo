@@ -11,6 +11,10 @@ encoder:
     time_step_rank: 64      # transformers MambaConfig kwarg (dt_rank)
     conv_kernel: 4
     expand: 2
+    use_mambapy: true       # mamba.py pure-PyTorch backend — parallel-scan fast
+                            # path that works on modern torch (no compiled
+                            # kernels); requires `pip install mambapy`. Falls
+                            # back to eager if mambapy missing.
 d_emb: 256                  # projection dim for per-sequence embeddings
 pooling: attention          # attention | mean | max
 head: bilinear_mlp          # bilinear_mlp | mlp

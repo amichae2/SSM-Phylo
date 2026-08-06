@@ -65,6 +65,7 @@ def _mamba_config(cfg: Any) -> Any:
         time_step_rank=int(kw["time_step_rank"]),
         conv_kernel=int(kw["conv_kernel"]),
         expand=int(kw["expand"]),
+        use_mambapy=bool(_get(kw, "use_mambapy", False)),
         tie_word_embeddings=False,
     )
 
