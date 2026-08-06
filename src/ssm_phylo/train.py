@@ -783,11 +783,8 @@ class Trainer:
             if self.args.smoke_step_delay:
                 time.sleep(self.args.smoke_step_delay)
             if self.global_step == 0:
-                log.info(
-                    "step 1: collated in %.2fs (tokens %s); running forward+backward. "
-                    "NOTE: the eager-Mamba fallback is sequential — at large sizes the "
-                    "first step can take minutes; you WILL see step 1 when it completes.",
-                    t_coll, tuple(batch[0].shape))
+                log.info("step 1: collated in %.2fs (tokens %s); starting training.",
+                         t_coll, tuple(batch[0].shape))
             row = self.train_step(batch)
             self.global_step += 1
             self.epoch = self.global_step // steps_per_epoch
