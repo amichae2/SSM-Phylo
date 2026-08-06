@@ -6,12 +6,11 @@
 # `import ssm_phylo` / `python -m ssm_phylo.*` to work.
 #
 # Fallback-first Mamba (AGENTS.md constraint 4):
-#   The pipeline runs fully on transformers' EAGER Mamba (MambaForCausalLM).
-#   mamba-ssm is OPTIONAL and is never installed here: mamba-ssm==2.1.0 is the
-#   last version that builds from source, and it requires an exact old-torch
-#   environment (torch 2.3.x era) — it fails to build on modern Colab
-#   (torch >= 2.11). Only scripts/colab_setup.sh may attempt it, gated behind
-#   SSM_PHYLO_TRY_MAMBA=1 (default off). Never let it block the pipeline.
+#   The pipeline runs fully on transformers' EAGER Mamba (MambaForCausalLM,
+#   transformers>=5). `kernels` (HuggingFace fused kernels, fast wheels) is an
+#   OPTIONAL speedup that transformers 5.x auto-detects; colab_setup.sh
+#   installs it non-fatally (safe anytime — no torch downgrade). mamba-ssm is
+#   obsolete (does not build on modern torch) and must never be used.
 #
 # Usage: pip install -r requirements-colab.txt
 #
@@ -24,7 +23,7 @@
 # THIS IS THE FULL DEPENDENCY LIST — there are no hidden extras to install.
 
 torch>=2.1
-transformers>=4.44
+transformers>=5.0
 numpy>=1.24
 pandas
 pyarrow
@@ -40,9 +39,6 @@ pytest
 ruff
 mypy
 
-# --- CUDA kernel extras (NOT installed; opt-in only) ---
-# mamba-ssm==2.1.0 needs an exact old-torch env and fails on modern Colab.
-# Set SSM_PHYLO_TRY_MAMBA=1 in scripts/colab_setup.sh to attempt it; the
-# pipeline runs fine without it (eager Mamba fallback).
-# causal-conv1d
-# mamba-ssm==2.1.0  (build from source: pip install mamba-ssm==2.1.0 --no-build-isolation)
+# --- Speed extra (NOT installed by this file; installed non-fatally by
+# --- scripts/colab_setup.sh — fast wheels, safe anytime, never required):
+# kernels

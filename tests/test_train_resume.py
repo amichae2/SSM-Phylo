@@ -2,7 +2,7 @@
 
 Runs the real `python -m ssm_phylo.train --smoke` entrypoint as a subprocess
 with a local tmp dir standing in for the Drive mirror (CKPT_DIR) and a scratch
-LOCAL_CKPT_DIR. No GPU, no Drive, no mamba-ssm needed.
+LOCAL_CKPT_DIR. No GPU, no Drive, no fused kernels needed.
 """
 import csv
 import os

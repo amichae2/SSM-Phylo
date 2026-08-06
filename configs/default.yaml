@@ -1,24 +1,16 @@
 # default.yaml — sane defaults for all model/training/eval knobs.
 # Configs merge over this file; CLI flags override YAML (see src/ssm_phylo/train.py).
 
-# ---- model (ProtMamba encoder, reused as-is; only the task head is trained) ----
+# ---- model (from-scratch Mamba on modern transformers; only the task head is trained) ----
 d_model: 1024
 n_layer: 16
 vocab_size: 38
 encoder:
-  kind: from_scratch        # from_scratch | degraded_protmamba | ptm_mamba
-                            # from_scratch = HF eager MambaForCausalLM, random
-                            # weights, license-clean, CI-safe (default)
-                            # degraded_protmamba = ProtMamba v1.0 backbone via
-                            # checkpoint_compat.py (see AGENTS.md known issue)
-                            # ptm_mamba = dormant (no public weights + cc-by-nc-nd)
-  checkpoint_dir: null      # degraded_protmamba only; null = $PROT_MAMBA_CKPT env
   mamba:
     state_size: 16
     time_step_rank: 64      # transformers MambaConfig kwarg (dt_rank)
     conv_kernel: 4
     expand: 2
-  ptm_model_id: ChatterjeeLab/PTM-Mamba  # code-only repo; no public weights (dormant by design)
 d_emb: 256                  # projection dim for per-sequence embeddings
 pooling: attention          # attention | mean | max
 head: bilinear_mlp          # bilinear_mlp | mlp

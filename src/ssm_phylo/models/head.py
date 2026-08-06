@@ -15,7 +15,7 @@ Design (rationale at the bottom of this docstring):
   MLP is computed in j-chunks to bound memory at large n (O(B*n*chunk*4d)).
 - PhyloModel composes an ENCODER-AGNOSTIC encoder (any object with a
   forward(tokens, ...) returning (B, L, d_model) and a d_model property, e.g.
-  ProtMambaEncoder) with the DistanceHead. Distances are predicted in
+  MambaEncoder) with the DistanceHead. Distances are predicted in
   NORMALIZED space; the per-sample scale is applied by the loss (Phase 3).
 
 SMOKE: `python -m ssm_phylo.models.head --smoke` builds a tiny from_scratch

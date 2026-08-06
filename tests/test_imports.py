@@ -1,29 +1,27 @@
-"""Import contract: the package must import without mamba-ssm installed.
+"""Import contract: the package must import without `kernels` installed.
 
-mamba-ssm is an optional fused-kernel dependency. If it is absent at runtime
-(imports wrapped in try/except), the pipeline falls back to HuggingFace
-transformers' eager Mamba. This test simulates absence by stubbing
-sys.modules BEFORE importing ssm_phylo.
+`kernels` (HuggingFace's fused kernels) is an optional speedup auto-detected
+by transformers 5.x. If it is absent at runtime, the pipeline falls back to
+transformers' eager Mamba. This test simulates absence by stubbing sys.modules
+BEFORE importing ssm_phylo.
 """
 
 import sys
 
 
-def test_import_without_mamba_ssm(monkeypatch):
-    """Importing ssm_phylo must not require the mamba_ssm package."""
-    monkeypatch.setitem(sys.modules, "mamba_ssm", None)
-    monkeypatch.setitem(sys.modules, "mamba_ssm.utils", None)
-    monkeypatch.setitem(sys.modules, "causal_conv1d", None)
+def test_import_without_kernels(monkeypatch):
+    """Importing ssm_phylo must not require the `kernels` package."""
+    monkeypatch.setitem(sys.modules, "kernels", None)
 
     import ssm_phylo
 
     assert ssm_phylo.__version__
-    assert "mamba_ssm" not in sys.modules or sys.modules["mamba_ssm"] is None
+    assert "kernels" not in sys.modules or sys.modules["kernels"] is None
 
 
-def test_submodules_import_without_mamba_ssm(monkeypatch):
-    """Every placeholder module imports cleanly with mamba-ssm stubbed out."""
-    monkeypatch.setitem(sys.modules, "mamba_ssm", None)
+def test_submodules_import_without_kernels(monkeypatch):
+    """Every module imports cleanly with `kernels` stubbed out."""
+    monkeypatch.setitem(sys.modules, "kernels", None)
 
     import importlib
 
@@ -33,7 +31,6 @@ def test_submodules_import_without_mamba_ssm(monkeypatch):
         "ssm_phylo.data.simulation",
         "ssm_phylo.data.datasets",
         "ssm_phylo.models",
-        "ssm_phylo.models.checkpoint_compat",
         "ssm_phylo.models.encoder",
         "ssm_phylo.models.head",
         "ssm_phylo.models.losses",

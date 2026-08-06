@@ -1,39 +1,28 @@
-"""Config-driven encoder construction + a backend-agnostic encoder wrapper.
+"""From-scratch Mamba encoder construction + a backend-agnostic wrapper.
 
-build_encoder(cfg) supports three kinds (see configs/default.yaml `encoder:`):
-- from_scratch:     HF transformers MambaForCausalLM (eager, random weights)
-                    at cfg d_model/n_layer/vocab_size. License-clean, CI-safe,
-                    needs no weights. DEFAULT.
-- degraded_protmamba: ProtMamba v1.0 backbone loaded via checkpoint_compat.py
-                    (shape-inferred, ckpt_layer remap, embedding re-initialized,
-                    finite-forward gate). Requires $PROT_MAMBA_CKPT.
-- ptm_mamba:        DORMANT. No public weights exist for ChatterjeeLab/PTM-Mamba
-                    (code-only repo, cc-by-nc-nd-4.0, whose ND clause forbids
-                    derivatives); raises a clear "not available" error.
-                    Time-boxed wrapper: raises a clear "not available" error
-                    unless SSM_PHYLO_PTM_MAMBA_DIR points at a local checkout
-                    that loads cleanly.
+build_encoder(cfg, device=None) ALWAYS builds the from-scratch transformers
+MambaForCausalLM at cfg d_model/n_layer/vocab_size (random weights —
+license-clean, CI-safe, no external weights). `kernels` (HuggingFace's fused
+kernels, fast wheels) is an OPTIONAL speedup auto-detected by transformers
+5.x; the eager Mamba path works everywhere and the old fused-kernel package
+is obsolete.
 
-ProtMambaEncoder wraps ANY backbone (the design is encoder-agnostic): hidden
-states are extracted with forward hooks on the backbone's layer stack, so no
-dependency on mamba-ssm APIs or backend-specific kwargs. Position ids
-(ProtMamba "1d" scheme) are forwarded only to backbones that support them.
+MambaEncoder wraps the backbone: hidden states are extracted via the
+backbone's native output_hidden_states path (no forward hooks — hooks defeat
+torch.utils.checkpoint's reentrant mode and destroy the gradient-checkpointing
+memory win), with a hook-based fallback for backbones lacking the native
+mechanism. Position ids (the "1d" scheme) are forwarded only to backbones
+that support them.
 """
 from __future__ import annotations
 
 import logging
-import os
-import threading
 from typing import Any
 
 import torch
 from torch import nn
 
 log = logging.getLogger(__name__)
-
-DOWNLOAD_HINT = (
-    "bash scripts/download_weights.sh   # -> $PROT_MAMBA_CKPT (then set PROT_MAMBA_CKPT)"
-)
 
 DEFAULT_MAMBA = {"state_size": 16, "time_step_rank": 64, "conv_kernel": 4, "expand": 2}
 
@@ -64,9 +53,6 @@ def _mamba_kwargs(cfg: Any) -> dict:
     return kw
 
 
-# --------------------------------------------------------------------------- #
-# backbone builders
-# --------------------------------------------------------------------------- #
 def _mamba_config(cfg: Any) -> Any:
     from transformers import MambaConfig
 
@@ -83,157 +69,13 @@ def _mamba_config(cfg: Any) -> Any:
     )
 
 
-def _build_from_scratch(cfg: Any, device: str | None) -> nn.Module:
-    """HF eager MambaForCausalLM with random weights (CI-safe, license-clean)."""
-    from transformers import MambaForCausalLM
-
-    model = MambaForCausalLM(_mamba_config(cfg))
-    if device:
-        model = model.to(device)
-    log.info("encoder kind=from_scratch: MambaForCausalLM %s", _mamba_config(cfg))
-    return model
-
-
-def _build_degraded_protmamba(
-    cfg: Any, checkpoint_dir: str | None, device: str | None
-) -> nn.Module:
-    """ProtMamba v1.0 backbone: compatible weights + re-init embedding + gate."""
-    from transformers import MambaForCausalLM
-
-    from ssm_phylo.models import checkpoint_compat as cc
-
-    ckpt_dir = (
-        checkpoint_dir
-        or _get(_encoder_section(cfg), "checkpoint_dir")
-        or os.environ.get("PROT_MAMBA_CKPT")
-    )
-    if not ckpt_dir or not os.path.isdir(ckpt_dir):
-        raise cc.ProtMambaWeightsError(
-            f"degraded_protmamba needs the ProtMamba checkpoint directory "
-            f"(got {ckpt_dir!r}). Download it first:\n    {DOWNLOAD_HINT}"
-        )
-    model = MambaForCausalLM(_mamba_config(cfg))
-    cc.load_degraded_backbone(model, ckpt_dir, cfg)
-    cc.reinit_embedding(model, int(_get(cfg, "d_model")), int(_get(cfg, "vocab_size")))
-    cc.gate_finite_forward(model, int(_get(cfg, "vocab_size")))
-    if device:
-        model = model.to(device)
-    return model
-
-
-def _timebox(seconds: float, fn, *args, **kwargs):
-    """Run fn with a wall-clock deadline; raise TimeoutError if it overruns."""
-    result: dict = {}
-    err: dict = {}
-
-    def runner() -> None:
-        try:
-            result["value"] = fn(*args, **kwargs)
-        except Exception as exc:  # noqa: BLE001 - re-raised by the caller
-            err["value"] = exc
-
-    thread = threading.Thread(target=runner, daemon=True)
-    thread.start()
-    thread.join(timeout=seconds)
-    if thread.is_alive():
-        raise TimeoutError(f"ptm_mamba load exceeded {seconds}s wall-clock budget")
-    if "value" in result:
-        return result["value"]
-    raise err["value"]
-
-
-def _build_ptm_mamba(cfg: Any, device: str | None) -> nn.Module:
-    """DORMANT: bidirectional gated Mamba + ESM-2 (PTM-Mamba), time-boxed.
-
-    No public weights exist for the requested id and the real PTM-Mamba
-    weights are cc-by-nc-nd-4.0 (no derivatives — fine-tuning or representation
-    extraction could count as derivative work, which would contaminate a
-    commercial release). This mode only works with a local checkout via
-    SSM_PHYLO_PTM_MAMBA_DIR and raises a clear "not available" error otherwise.
-    """
-    model_id = _get(_encoder_section(cfg), "ptm_model_id", "ChatterjeeLab/PTM-Mamba")
-    local = os.environ.get("SSM_PHYLO_PTM_MAMBA_DIR")
-    budget = float(os.environ.get("SSM_PHYLO_PTM_MAMBA_TIMEOUT", "120"))
-    try:
-        if local and os.path.isdir(local):
-            model = _timebox(
-                budget,
-                _load_ptm_mamba_local,
-                local,
-                int(_get(cfg, "d_model")),
-                int(_get(cfg, "n_layer")),
-                int(_get(cfg, "vocab_size")),
-            )
-        else:
-            model = _timebox(
-                budget, _load_ptm_mamba_hf, model_id,
-                int(_get(cfg, "d_model")), int(_get(cfg, "n_layer")), int(_get(cfg, "vocab_size")),
-            )
-    except Exception as exc:
-        raise RuntimeError(
-            f"ptm_mamba not available: {exc} "
-            f"(no public weights for '{model_id}'; real PTM-Mamba is "
-            "cc-by-nc-nd-4.0; set SSM_PHYLO_PTM_MAMBA_DIR to a local checkout)"
-        ) from exc
-    if device:
-        model = model.to(device)
-    return model
-
-
-def _load_ptm_mamba_hf(model_id: str, d_model: int, n_layer: int, vocab_size: int) -> nn.Module:
-    from transformers import AutoConfig, AutoModel
-
-    config = AutoConfig.from_pretrained(model_id)
-    model = AutoModel.from_pretrained(model_id, config=config)
-    _validate_ptm_shape(model, d_model, n_layer, vocab_size)
-    return model
-
-
-def _load_ptm_mamba_local(path: str, d_model: int, n_layer: int, vocab_size: int) -> nn.Module:
-    """Load from a local checkout; the exact loader depends on the checkout layout."""
-    import importlib.util
-
-    for candidate in (
-        os.path.join(path, "protein_lm", "modeling", "models", "ptm_mamba.py"),
-        os.path.join(path, "ptm_mamba.py"),
-        os.path.join(path, "modeling.py"),
-    ):
-        if os.path.exists(candidate):
-            spec = importlib.util.spec_from_file_location("ptm_mamba_local", candidate)
-            if spec is None or spec.loader is None:
-                raise FileNotFoundError(f"cannot load {candidate}")
-            mod = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(mod)
-            for name in ("load_pretrained", "PTMMamba", "create_model", "load_model"):
-                fn = getattr(mod, name, None)
-                if callable(fn):
-                    return _validate_ptm_shape(fn(), d_model, n_layer, vocab_size)
-    raise FileNotFoundError("no recognizable model loader in the local checkout")
-
-
-def _validate_ptm_shape(model: nn.Module, d_model: int, n_layer: int, vocab_size: int) -> nn.Module:
-    cfg = getattr(model, "config", None)
-    if cfg is not None:
-        got = {
-            "d_model": getattr(cfg, "hidden_size", getattr(cfg, "d_model", None)),
-            "n_layer": getattr(cfg, "num_hidden_layers", getattr(cfg, "n_layer", None)),
-            "vocab": getattr(cfg, "vocab_size", None),
-        }
-        want = {"d_model": d_model, "n_layer": n_layer, "vocab": vocab_size}
-        if any(got[k] is not None and got[k] != want[k] for k in want):
-            raise ValueError(
-                f"ptm_mamba shape mismatch: got {got}, want {want}"
-            )
-    return model
-
-
 # --------------------------------------------------------------------------- #
 # position ids ("1d" scheme, pure function)
 # --------------------------------------------------------------------------- #
 def make_position_ids(
     seq_spans: torch.Tensor, max_pos: int = 2048, max_seq_pos: int = 512
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """ProtMamba "1d" position ids for a padded span tensor.
+    """Position ids for a padded span tensor (per-token stream positions).
 
     Args:
         seq_spans: (B, N, 2) long tensor of (start, end) token spans, or (N, 2)
@@ -267,13 +109,12 @@ def make_position_ids(
 # --------------------------------------------------------------------------- #
 # backend-agnostic wrapper
 # --------------------------------------------------------------------------- #
-class ProtMambaEncoder(nn.Module):
-    """Wraps any Mamba-style backbone; extracts last-layer hidden states.
+class MambaEncoder(nn.Module):
+    """Wraps any Mamba-style backbone; extracts chosen-layer hidden states.
 
-    Hidden states come from forward hooks on the backbone's layer stack, so
-    the wrapper works identically for transformers MambaForCausalLM, the
-    degraded ProtMamba build, and a hypothetical PTM-Mamba wrapper — no
-    mamba-ssm dependency.
+    Hidden states come from the backbone's native output_hidden_states when
+    available (the transformers MambaForCausalLM path), falling back to
+    forward hooks on the backbone's layer stack for custom backbones.
     """
 
     def __init__(self, backbone: nn.Module, supports_positions: bool | None = None) -> None:
@@ -282,9 +123,7 @@ class ProtMambaEncoder(nn.Module):
         if supports_positions is None:
             name = type(backbone).__name__
             self.supports_positions = bool(
-                hasattr(backbone, "position_embedding")
-                or "Posids" in name
-                or "PTM" in name
+                hasattr(backbone, "position_embedding") or "Posids" in name
             )
         else:
             self.supports_positions = supports_positions
@@ -331,8 +170,8 @@ class ProtMambaEncoder(nn.Module):
           MambaForCausalLM) return per-layer hidden states natively. NO forward
           hooks — hooks defeat torch.utils.checkpoint's reentrant mode and
           destroy the gradient-checkpointing memory win.
-        - "hooks": fallback for custom backbones (ProtMamba / PTM wrappers)
-          that lack output_hidden_states; last-layer hook capture.
+        - "hooks": fallback for custom backbones that lack
+          output_hidden_states; last-layer hook capture.
         """
         kwargs: dict[str, Any] = {"input_ids": tokens, "use_cache": False}
         if self.supports_positions and position_ids is not None:
@@ -393,17 +232,16 @@ class ProtMambaEncoder(nn.Module):
 # --------------------------------------------------------------------------- #
 # entry point
 # --------------------------------------------------------------------------- #
-def build_encoder(
-    cfg: Any, checkpoint_dir: str | None = None, device: str | None = None
-) -> ProtMambaEncoder:
-    """Build the encoder per cfg.encoder.kind (from_scratch default)."""
-    kind = _get(_encoder_section(cfg), "kind", "from_scratch")
-    if kind == "from_scratch":
-        backbone = _build_from_scratch(cfg, device)
-    elif kind == "degraded_protmamba":
-        backbone = _build_degraded_protmamba(cfg, checkpoint_dir, device)
-    elif kind == "ptm_mamba":
-        backbone = _build_ptm_mamba(cfg, device)
-    else:
-        raise ValueError(f"unknown encoder.kind '{kind}'")
-    return ProtMambaEncoder(backbone)
+def build_encoder(cfg: Any, device: str | None = None) -> MambaEncoder:
+    """Build the from-scratch transformers MambaForCausalLM encoder.
+
+    No external weights, no dispatcher: the from-scratch path is the only
+    path. `kernels` (optional fused kernels) is auto-detected by transformers.
+    """
+    from transformers import MambaForCausalLM
+
+    model = MambaForCausalLM(_mamba_config(cfg))
+    if device:
+        model = model.to(torch.device(device))  # type: ignore[arg-type]  # torch 2.5 _Wrapped typing noise
+    log.info("encoder: MambaForCausalLM %s", _mamba_config(cfg))
+    return MambaEncoder(model)

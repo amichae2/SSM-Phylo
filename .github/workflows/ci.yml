@@ -29,7 +29,7 @@ jobs:
       - name: Mypy
         run: mypy src/ssm_phylo tests
 
-      - name: Pytest (CPU, no mamba-ssm, no network)
+      - name: Pytest (CPU, no kernels, no network)
         env:
           HF_HUB_OFFLINE: "1"
           CUDA_VISIBLE_DEVICES: ""
